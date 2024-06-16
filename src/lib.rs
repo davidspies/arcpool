@@ -45,7 +45,7 @@ impl<T> ArcPool<T> {
         drop(read_guard);
         let read_guard = self.0.upgradable_read();
         let inner = std::sync::Arc::new(ArcPoolInner::with_capacity(
-            (read_guard.mem.len() * 2).max(1),
+            read_guard.mem.len() * 2,
             read_guard.offset + read_guard.mem.len(),
             std::sync::Arc::downgrade(&read_guard),
         ));
@@ -169,6 +169,7 @@ struct ArcPoolInner<T> {
 
 impl<T> ArcPoolInner<T> {
     fn with_capacity(cap: usize, offset: usize, prev: std::sync::Weak<ArcPoolInner<T>>) -> Self {
+        let cap = cap.max(1);
         Self {
             free_list: Mutex::new((0..cap).rev().collect()),
             mem: (0..cap)
