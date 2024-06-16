@@ -59,6 +59,7 @@ pub struct Receiver<T, C: UnsafeConsumer<T> = Safe<DropNormally>> {
 
 impl<T: Clone> Receiver<T> {
     pub async fn recv(&mut self) -> Option<T> {
+        self.notify.mark_unchanged();
         loop {
             if let Some(result) = self.inner.try_next() {
                 return Some(result);
