@@ -101,14 +101,21 @@ impl<T> Arc<T> {
     }
 
     pub unsafe fn from_index(pool: &ArcPool<T>, index: ArcIndex) -> Self {
-        let result = Self::clone_from_index(pool, &index);
+        let result = Self::reconstruct_from_ref(pool, &index);
         std::sync::Arc::decrement_strong_count(&result.pool);
         let ArcIndex(_, panicker) = index;
         let _ = ConsumeOnDrop::into_inner(panicker);
         result
     }
 
-    pub unsafe fn clone_from_index(
+    pub unsafe fn clone_from_index(pool: &ArcPool<T>, index: &ArcIndex) -> Self {
+        let result = Self::reconstruct_from_ref(pool, index);
+        let (ref_count, _) = &result.pool.mem[result.index];
+        ref_count.fetch_add(1, atomic::Ordering::Relaxed);
+        result
+    }
+
+    unsafe fn reconstruct_from_ref(
         ArcPool(pool): &ArcPool<T>,
         &ArcIndex(index, _): &ArcIndex,
     ) -> Self {
