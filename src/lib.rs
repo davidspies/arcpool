@@ -10,6 +10,7 @@ use std::{
 };
 
 use consume_on_drop::{Consume, ConsumeOnDrop};
+use derive_where::derive_where;
 use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard};
 
 pub mod broadcast;
@@ -39,7 +40,12 @@ impl<T> ArcPool<T> {
     pub fn alloc(&self, mut value: T) -> Arc<T> {
         let read_guard = self.0.read();
         value = match read_guard.try_alloc(value) {
-            Ok(arc) => return arc,
+            Ok(arc_inner) => {
+                return Arc {
+                    inner: ConsumeOnDrop::new(arc_inner),
+                    _phantom: PhantomData,
+                }
+            }
             Err(value) => value,
         };
         drop(read_guard);
@@ -53,16 +59,24 @@ impl<T> ArcPool<T> {
             .next
             .set(inner.clone())
             .unwrap_or_else(|_| unreachable!());
-        let arc = inner.try_alloc(value).unwrap_or_else(|_| unreachable!());
+        let arc_inner = inner.try_alloc(value).unwrap_or_else(|_| unreachable!());
         *RwLockUpgradableReadGuard::upgrade(read_guard) = inner;
-        arc
+        Arc {
+            inner: ConsumeOnDrop::new(arc_inner),
+            _phantom: PhantomData,
+        }
     }
 }
 
+#[derive_where(Clone)]
 pub struct Arc<T> {
+    inner: ConsumeOnDrop<ArcInner<T>>,
+    _phantom: PhantomData<*const T>, // Arc<T> should not be `Send` unless T is `Send` and `Sync`
+}
+
+struct ArcInner<T> {
     pool: std::sync::Arc<ArcPoolInner<T>>,
     index: usize,
-    _phantom: PhantomData<*const T>, // Arc<T> should not be `Send` unless T is `Send` and `Sync`
 }
 
 unsafe impl<T: Send + Sync> Send for Arc<T> {}
@@ -79,28 +93,48 @@ impl Consume for Panicker {
 }
 
 impl<T> Arc<T> {
-    pub fn into_index(this: Self) -> ArcIndex {
-        unsafe { std::sync::Arc::increment_strong_count(&this.pool) }
-        ArcIndex(this.pool.offset + this.index, ConsumeOnDrop::new(Panicker))
+    pub fn into_inner(Self { inner, _phantom }: Self) -> Option<T> {
+        ConsumeOnDrop::into_inner(inner).into_inner()
     }
 
-    pub fn into_inner(mut this: Self) -> Option<T> {
-        unsafe { this.drop_helper() }
+    pub fn into_index(self) -> ArcIndex {
+        ArcInner::into_index(ConsumeOnDrop::into_inner(self.inner))
     }
 
-    unsafe fn drop_helper(&mut self) -> Option<T> {
+    pub unsafe fn from_index(pool: &ArcPool<T>, index: ArcIndex) -> Self {
+        Self {
+            inner: ConsumeOnDrop::new(ArcInner::from_index(&pool, index)),
+            _phantom: PhantomData,
+        }
+    }
+
+    pub unsafe fn clone_from_index(pool: &ArcPool<T>, index: &ArcIndex) -> Self {
+        Self {
+            inner: ConsumeOnDrop::new(ArcInner::clone_from_index(&pool, index)),
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl<T> ArcInner<T> {
+    fn into_inner(self) -> Option<T> {
         let (ref_count, ptr) = &self.pool.mem[self.index];
-        if ref_count.fetch_sub(1, atomic::Ordering::Release) > 0 {
+        if ref_count.fetch_sub(1, atomic::Ordering::Release) > 1 {
             return None;
         }
         atomic::fence(atomic::Ordering::Acquire);
         let ptr = ptr.get();
-        let result = mem::replace(&mut *ptr, MaybeUninit::uninit());
+        let result = mem::replace(unsafe { &mut *ptr }, MaybeUninit::uninit());
         self.pool.free_list.lock().push(self.index);
-        Some(result.assume_init())
+        Some(unsafe { result.assume_init() })
     }
 
-    pub unsafe fn from_index(pool: &ArcPool<T>, index: ArcIndex) -> Self {
+    fn into_index(this: Self) -> ArcIndex {
+        unsafe { std::sync::Arc::increment_strong_count(&this.pool) }
+        ArcIndex(this.pool.offset + this.index, ConsumeOnDrop::new(Panicker))
+    }
+
+    unsafe fn from_index(pool: &ArcPool<T>, index: ArcIndex) -> Self {
         let result = Self::reconstruct_from_ref(pool, &index);
         std::sync::Arc::decrement_strong_count(&result.pool);
         let ArcIndex(_, panicker) = index;
@@ -108,7 +142,7 @@ impl<T> Arc<T> {
         result
     }
 
-    pub unsafe fn clone_from_index(pool: &ArcPool<T>, index: &ArcIndex) -> Self {
+    unsafe fn clone_from_index(pool: &ArcPool<T>, index: &ArcIndex) -> Self {
         let result = Self::reconstruct_from_ref(pool, index);
         let (ref_count, _) = &result.pool.mem[result.index];
         ref_count.fetch_add(1, atomic::Ordering::Relaxed);
@@ -126,24 +160,30 @@ impl<T> Arc<T> {
         Self {
             index: index - pool.offset,
             pool,
-            _phantom: PhantomData,
         }
     }
 }
 
-impl<T> Clone for Arc<T> {
+impl<T> Clone for ArcInner<T> {
     fn clone(&self) -> Self {
         let (ref_count, _ptr) = &self.pool.mem[self.index];
         ref_count.fetch_add(1, atomic::Ordering::Relaxed);
         Self {
             pool: self.pool.clone(),
             index: self.index,
-            _phantom: PhantomData,
         }
     }
 }
 
 impl<T> Deref for Arc<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &*self.inner
+    }
+}
+
+impl<T> Deref for ArcInner<T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -153,9 +193,9 @@ impl<T> Deref for Arc<T> {
     }
 }
 
-impl<T> Drop for Arc<T> {
-    fn drop(&mut self) {
-        drop(unsafe { self.drop_helper() })
+impl<T> Consume for ArcInner<T> {
+    fn consume(self) {
+        drop(self.into_inner());
     }
 }
 
@@ -181,7 +221,7 @@ impl<T> ArcPoolInner<T> {
         }
     }
 
-    fn try_alloc(self: &std::sync::Arc<Self>, value: T) -> Result<Arc<T>, T> {
+    fn try_alloc(self: &std::sync::Arc<Self>, value: T) -> Result<ArcInner<T>, T> {
         let index = match self.free_list.lock().pop() {
             Some(index) => index,
             None => return Err(value),
@@ -190,10 +230,9 @@ impl<T> ArcPoolInner<T> {
         refcount.fetch_add(1, atomic::Ordering::Relaxed);
         let ptr = ptr.get();
         unsafe { &mut *ptr }.write(value);
-        Ok(Arc {
+        Ok(ArcInner {
             pool: self.clone(),
             index,
-            _phantom: PhantomData,
         })
     }
 }

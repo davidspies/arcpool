@@ -79,6 +79,7 @@ impl<T: Clone> Receiver<T> {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TryRecvError {
     Empty,
     Disconnected,
