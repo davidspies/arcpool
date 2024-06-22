@@ -12,4 +12,4 @@ tokio = { version = "*", features = ["sync"] }
 arc_slab_pool = { path = "../arc_slab_pool" }
 
 [dev-dependencies]
-tokio = { version = "*", features = ["macros", "rt", "sync"] }
+tokio = { version = "*", features = ["macros", "rt"] }
