@@ -1,5 +1,5 @@
 [package]
-name = "arc_slab_pool"
+name = "arc_slice_pool"
 version = "0.1.0"
 edition = "2021"
 

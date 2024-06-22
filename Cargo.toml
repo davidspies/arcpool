@@ -1,4 +1,4 @@
 [workspace]
 resolver = "2"
 
-members = ["arc_slab_pool", "breadcrumb_channel"]
+members = ["arc_slice_pool", "breadcrumb_channel"]

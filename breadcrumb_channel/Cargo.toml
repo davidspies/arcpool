@@ -9,7 +9,7 @@ derive-where = "*"
 parking_lot = "*"
 tokio = { version = "*", features = ["sync"] }
 
-arc_slab_pool = { path = "../arc_slab_pool" }
+arc_slice_pool = { path = "../arc_slice_pool" }
 
 [dev-dependencies]
 tokio = { version = "*", features = ["macros", "rt"] }

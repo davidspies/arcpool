@@ -1,4 +1,4 @@
-use arc_slab_pool::{Arc, ArcIndex, ArcPool};
+use arc_slice_pool::{Arc, ArcIndex, ArcPool};
 use consume_on_drop::ConsumeOnDrop;
 use derive_where::derive_where;
 use tokio::sync::watch;
