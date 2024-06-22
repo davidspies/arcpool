@@ -158,14 +158,12 @@ impl<T> ArcSender<T> {
 impl<T> ArcReceiver<T> {
     pub async fn recv(&mut self) -> Option<Arc<T>> {
         let arc_index = self.0.recv().await?;
-        let pool = self.0.consumer();
-        Some(unsafe { Arc::from_index(pool, arc_index) })
+        Some(unsafe { Arc::from_index(self.pool(), arc_index) })
     }
 
     pub fn try_recv(&mut self) -> Result<Arc<T>, TryRecvError> {
         let arc_index = self.0.try_recv()?;
-        let pool = self.0.consumer();
-        Ok(unsafe { Arc::from_index(pool, arc_index) })
+        Ok(unsafe { Arc::from_index(self.pool(), arc_index) })
     }
 
     pub fn pool(&self) -> &std::sync::Arc<ArcPool<T>> {
