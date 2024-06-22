@@ -12,9 +12,7 @@ impl<T> Node<T> {
     pub(super) fn set(&self, value: T, next: Arc<Node<T>>) {
         self.0
             .set((value, Arc::into_index(next)))
-            .unwrap_or_else(|_| {
-                panic!("Node::set: called twice on the same node");
-            });
+            .unwrap_or_else(|_| panic!("Node::set: called twice on the same node"));
     }
     pub(super) fn get(&self) -> Option<&(T, ArcIndex)> {
         self.0.get()
