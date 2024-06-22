@@ -150,7 +150,7 @@ impl<T> ArcSender<T> {
         self.0.closed().await
     }
 
-    pub fn consumer(&self) -> &std::sync::Arc<ArcPool<T>> {
+    pub fn pool(&self) -> &std::sync::Arc<ArcPool<T>> {
         self.0.consumer()
     }
 }
@@ -168,7 +168,7 @@ impl<T> ArcReceiver<T> {
         Ok(unsafe { Arc::from_index(pool, arc_index) })
     }
 
-    pub fn consumer(&self) -> &std::sync::Arc<ArcPool<T>> {
+    pub fn pool(&self) -> &std::sync::Arc<ArcPool<T>> {
         self.0.consumer()
     }
 }
