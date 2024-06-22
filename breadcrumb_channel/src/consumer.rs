@@ -1,4 +1,4 @@
-use crate::{Arc, ArcIndex, ArcPool};
+use arc_slab_pool::{Arc, ArcIndex, ArcPool};
 
 #[derive(Clone, Copy)]
 pub struct DropNormally;

@@ -1,8 +1,7 @@
+use arc_slab_pool::ArcPool;
 use consume_on_drop::ConsumeOnDrop;
 use derive_where::derive_where;
 use tokio::sync::watch;
-
-use crate::ArcPool;
 
 use self::consumer::{DropNormally, Safe};
 use self::inner::{ReceiverInner, SenderInner};

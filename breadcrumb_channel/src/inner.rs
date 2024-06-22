@@ -1,10 +1,9 @@
 use std::mem;
 
+use arc_slab_pool::{Arc, ArcPool};
 use consume_on_drop::Consume;
 use derive_where::derive_where;
 use parking_lot::Mutex;
-
-use crate::{Arc, ArcPool};
 
 use super::consumer::UnsafeConsumer;
 use super::node::{self, Node};

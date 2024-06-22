@@ -13,8 +13,6 @@ use consume_on_drop::{Consume, ConsumeOnDrop};
 use derive_where::derive_where;
 use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard};
 
-pub mod broadcast;
-
 pub struct ArcPool<T>(RwLock<std::sync::Arc<ArcPoolInner<T>>>);
 
 unsafe impl<T: Send + Sync> Send for ArcPool<T> {}

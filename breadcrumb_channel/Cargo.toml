@@ -1,0 +1,15 @@
+[package]
+name = "breadcrumb_channel"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+consume_on_drop = "*"
+derive-where = "*"
+parking_lot = "*"
+tokio = { version = "*", features = ["sync"] }
+
+arc_slab_pool = { path = "../arc_slab_pool" }
+
+[dev-dependencies]
+tokio = { version = "*", features = ["macros", "rt", "sync"] }

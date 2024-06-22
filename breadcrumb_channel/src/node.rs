@@ -1,8 +1,7 @@
 use std::sync::OnceLock;
 
+use arc_slab_pool::{Arc, ArcIndex, ArcPool};
 use derive_where::derive_where;
-
-use crate::{Arc, ArcIndex, ArcPool};
 
 use super::consumer::UnsafeConsumer;
 
