@@ -26,6 +26,8 @@ impl<T, C: Consumer<T>> Sender<T, Safe<C>> {
 }
 
 impl<T, C: UnsafeConsumer<T>> Sender<T, C> {
+    /// # Safety
+    /// The value must be a valid value for the consumer
     pub unsafe fn unsafe_send(&self, value: T) -> Result<(), T> {
         if self.notify.is_closed() {
             return Err(value);
@@ -50,7 +52,7 @@ impl<T, C: UnsafeConsumer<T>> Sender<T, C> {
     }
 
     pub fn consumer(&self) -> &C {
-        &self.inner.consumer()
+        self.inner.consumer()
     }
 }
 
@@ -82,7 +84,7 @@ impl<T, C: UnsafeConsumer<T>> Receiver<T, C> {
     }
 
     pub fn consumer(&self) -> &C {
-        &self.inner.consumer()
+        self.inner.consumer()
     }
 }
 

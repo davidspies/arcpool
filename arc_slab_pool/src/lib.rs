@@ -99,16 +99,20 @@ impl<T> Arc<T> {
         ArcInner::into_index(ConsumeOnDrop::into_inner(self.inner))
     }
 
+    /// # Safety
+    /// Must be the same pool as the one that created the Arc
     pub unsafe fn from_index(pool: &ArcPool<T>, index: ArcIndex) -> Self {
         Self {
-            inner: ConsumeOnDrop::new(ArcInner::from_index(&pool, index)),
+            inner: ConsumeOnDrop::new(ArcInner::from_index(pool, index)),
             _phantom: PhantomData,
         }
     }
 
+    /// # Safety
+    /// Must be the same pool as the one that created the Arc
     pub unsafe fn clone_from_index(pool: &ArcPool<T>, index: &ArcIndex) -> Self {
         Self {
-            inner: ConsumeOnDrop::new(ArcInner::clone_from_index(&pool, index)),
+            inner: ConsumeOnDrop::new(ArcInner::clone_from_index(pool, index)),
             _phantom: PhantomData,
         }
     }
@@ -177,7 +181,7 @@ impl<T> Deref for Arc<T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
-        &*self.inner
+        &self.inner
     }
 }
 
@@ -187,7 +191,7 @@ impl<T> Deref for ArcInner<T> {
     fn deref(&self) -> &Self::Target {
         let (_ref_count, ptr) = &self.pool.mem[self.index];
         let ptr = ptr.get();
-        unsafe { &(*ptr).assume_init_ref() }
+        unsafe { (*ptr).assume_init_ref() }
     }
 }
 

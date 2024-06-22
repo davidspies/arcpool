@@ -101,7 +101,7 @@ async fn test_sent_and_received_value_dropped() {
     let tracker = DropTracker::new();
 
     // Send the DropTracker through the channel
-    assert_eq!(sender.send(tracker.clone()).unwrap(), ());
+    sender.send(tracker.clone()).unwrap();
 
     // Receive the DropTracker from the channel
     let received_tracker = receiver.recv().await.unwrap();
@@ -116,7 +116,7 @@ async fn test_sent_and_not_received_value_dropped() {
     let tracker = DropTracker::new();
 
     // Send the DropTracker through the channel
-    assert_eq!(sender.send(tracker.clone()).unwrap(), ());
+    sender.send(tracker.clone()).unwrap();
 
     // Drop the receiver without receiving the value
     drop(receiver);

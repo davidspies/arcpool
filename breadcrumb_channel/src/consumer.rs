@@ -18,7 +18,9 @@ impl<C: Consumer<T>, T> Consumer<T> for std::sync::Arc<C> {
 }
 
 pub trait UnsafeConsumer<T> {
+    #[allow(clippy::missing_safety_doc)]
     unsafe fn clone_value(&self, value: &T) -> T;
+    #[allow(clippy::missing_safety_doc)]
     unsafe fn consume(&self, value: T);
 }
 

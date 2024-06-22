@@ -1,0 +1,40 @@
+{
+    // See https://go.microsoft.com/fwlink/?LinkId=733558
+    // for the documentation about the tasks.json format
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "cargo check",
+            "type": "cargo",
+            "command": "cargo",
+            "args": [
+                "check",
+                "--all-features",
+                "--all-targets"
+            ],
+            "group": "build"
+        },
+        {
+            "label": "cargo test",
+            "type": "cargo",
+            "command": "cargo",
+            "args": [
+                "test",
+                "--all-features",
+                "--all-targets"
+            ],
+            "group": "build"
+        },
+        {
+            "label": "cargo clippy",
+            "type": "cargo",
+            "command": "cargo",
+            "args": [
+                "clippy",
+                "--all-features",
+                "--all-targets"
+            ],
+            "group": "build"
+        }
+    ]
+}
