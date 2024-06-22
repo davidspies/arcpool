@@ -52,6 +52,10 @@ impl<T, C: UnsafeConsumer<T>> SenderInner<T, C> {
             consumer: self.consumer.clone(),
         }
     }
+
+    pub(super) fn consumer(&self) -> &C {
+        &self.consumer
+    }
 }
 
 #[derive_where(Clone; C)]
@@ -80,15 +84,16 @@ impl<T, C: UnsafeConsumer<T>> ReceiverInner<T, C> {
         }
     }
 
-    pub(super) fn try_next(&mut self) -> Option<T>
-    where
-        T: Clone,
-    {
+    pub(super) fn try_next(&mut self) -> Option<T> {
         let (value, next_node) = self.next.get()?;
-        let value = value.clone();
+        let value = unsafe { self.consumer.clone_value(value) };
         let new_next = unsafe { Arc::clone_from_index(&self.node_pool, next_node) };
         let old_next = mem::replace(&mut self.next, new_next);
         unsafe { node::drop_with(old_next, &self.node_pool, &self.consumer) };
         Some(value)
+    }
+
+    pub(super) fn consumer(&self) -> &C {
+        &self.consumer
     }
 }

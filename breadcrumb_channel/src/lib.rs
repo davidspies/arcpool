@@ -1,4 +1,4 @@
-use arc_slab_pool::ArcPool;
+use arc_slab_pool::{Arc, ArcIndex, ArcPool};
 use consume_on_drop::ConsumeOnDrop;
 use derive_where::derive_where;
 use tokio::sync::watch;
@@ -48,6 +48,10 @@ impl<T, C: UnsafeConsumer<T>> Sender<T, C> {
     pub async fn closed(&self) {
         self.notify.closed().await
     }
+
+    pub fn consumer(&self) -> &C {
+        &self.inner.consumer()
+    }
 }
 
 #[derive_where(Clone; C)]
@@ -56,7 +60,7 @@ pub struct Receiver<T, C: UnsafeConsumer<T> = Safe<DropNormally>> {
     notify: watch::Receiver<()>,
 }
 
-impl<T: Clone> Receiver<T> {
+impl<T, C: UnsafeConsumer<T>> Receiver<T, C> {
     pub async fn recv(&mut self) -> Option<T> {
         self.notify.mark_unchanged();
         loop {
@@ -76,6 +80,10 @@ impl<T: Clone> Receiver<T> {
             }
         })
     }
+
+    pub fn consumer(&self) -> &C {
+        &self.inner.consumer()
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -84,7 +92,7 @@ pub enum TryRecvError {
     Disconnected,
 }
 
-pub fn channel<T>() -> (Sender<T>, Receiver<T>) {
+pub fn channel<T: Clone>() -> (Sender<T>, Receiver<T>) {
     channel_with_consumer(Safe(DropNormally))
 }
 
@@ -108,4 +116,57 @@ pub fn channel_with_consumer<T, C: UnsafeConsumer<T> + Clone>(
             notify: rx,
         },
     )
+}
+
+pub struct ArcSender<T>(Sender<ArcIndex, std::sync::Arc<ArcPool<T>>>);
+pub struct ArcReceiver<T>(Receiver<ArcIndex, std::sync::Arc<ArcPool<T>>>);
+
+pub fn arc_channel<T>() -> (ArcSender<T>, ArcReceiver<T>) {
+    let arc_pool = std::sync::Arc::new(ArcPool::new());
+    let (sender, receiver) = channel_with_consumer(arc_pool);
+    (ArcSender(sender), ArcReceiver(receiver))
+}
+
+impl<T> ArcSender<T> {
+    pub fn send(&self, value: T) -> Result<(), T> {
+        let pool = self.0.consumer();
+        let arc = pool.alloc(value);
+        let arc_index = Arc::into_index(arc);
+        let rejected = match unsafe { self.0.unsafe_send(arc_index) } {
+            Ok(()) => return Ok(()),
+            Err(rejected) => rejected,
+        };
+        let reconstructed = unsafe { Arc::from_index(pool, rejected) };
+        Err(Arc::into_inner(reconstructed).unwrap())
+    }
+
+    pub fn subscribe(&self) -> ArcReceiver<T> {
+        ArcReceiver(self.0.subscribe())
+    }
+
+    pub async fn closed(&self) {
+        self.0.closed().await
+    }
+
+    pub fn consumer(&self) -> &std::sync::Arc<ArcPool<T>> {
+        self.0.consumer()
+    }
+}
+
+impl<T> ArcReceiver<T> {
+    pub async fn recv(&mut self) -> Option<Arc<T>> {
+        let arc_index = self.0.recv().await?;
+        let pool = self.0.consumer();
+        Some(unsafe { Arc::from_index(pool, arc_index) })
+    }
+
+    pub fn try_recv(&mut self) -> Result<Arc<T>, TryRecvError> {
+        let arc_index = self.0.try_recv()?;
+        let pool = self.0.consumer();
+        Ok(unsafe { Arc::from_index(pool, arc_index) })
+    }
+
+    pub fn consumer(&self) -> &std::sync::Arc<ArcPool<T>> {
+        self.0.consumer()
+    }
 }
