@@ -1,0 +1,10 @@
+[package]
+name = "arc_queue_pool"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+derive-where = "*"
+parking_lot = "*"
+
+stable_queue = { path = "../stable_queue" }
