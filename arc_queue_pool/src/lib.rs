@@ -159,7 +159,52 @@ impl<T> ArcInner<T> {
     }
 
     fn into_inner_and_next(self) -> Option<(T, Option<ArcInner<T>>)> {
-        todo!()
+        let (ref_count, _) = unsafe { &*self.ptr };
+        let mut cur_count = ref_count.load(atomic::Ordering::Relaxed);
+        while cur_count > 1 {
+            match ref_count.compare_exchange_weak(
+                cur_count,
+                cur_count - 1,
+                atomic::Ordering::Release,
+                atomic::Ordering::Relaxed,
+            ) {
+                Ok(_) => return None,
+                Err(count) => cur_count = count,
+            }
+        }
+        let guard = self.pool.0.read();
+        ref_count
+            .compare_exchange(1, 0, atomic::Ordering::Acquire, atomic::Ordering::Relaxed)
+            .unwrap();
+        let front_ptr = guard.front().unwrap().front().unwrap();
+        if !ptr::addr_eq(front_ptr, self.ptr) {
+            return None;
+        }
+        drop(guard);
+        let mut guard = self.pool.0.write();
+        let front_queue = guard.front_mut().unwrap();
+        let (refcount, _val) = front_queue.front().unwrap();
+        debug_assert_eq!(refcount.load(atomic::Ordering::Relaxed), 0);
+        let (_refcount, result) = front_queue.pop_front().unwrap();
+        if front_queue.is_empty() {
+            if guard.len() == 1 {
+                return Some((result, None));
+            }
+            guard.pop_front();
+        }
+        let front_queue = guard.front_mut().unwrap();
+        let index = front_queue.front_idx().unwrap();
+        let next_ptr = front_queue.front().unwrap();
+        let (ref_count, _value) = next_ptr;
+        ref_count.fetch_add(1, atomic::Ordering::Relaxed);
+        Some((
+            result,
+            Some(ArcInner {
+                pool: self.pool.clone(),
+                ptr: next_ptr,
+                index,
+            }),
+        ))
     }
 
     fn get(&self) -> &T {
