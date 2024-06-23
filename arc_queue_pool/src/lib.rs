@@ -51,11 +51,16 @@ pub struct Arc<T>(ConsumeOnDrop<ArcInner<T>>);
 
 impl<T> Arc<T> {
     pub fn next(this: &Self) -> Option<Self> {
-        this.0.next().map(|inner| Arc(ConsumeOnDrop::new(inner)))
+        this.0.next().map(|inner| Self(ConsumeOnDrop::new(inner)))
     }
 
     pub fn into_inner(this: Self) -> Option<T> {
         ConsumeOnDrop::into_inner(this.0).into_inner()
+    }
+
+    pub fn into_inner_and_next(this: Self) -> Option<(T, Option<Self>)> {
+        let (inner, next) = ConsumeOnDrop::into_inner(this.0).into_inner_and_next()?;
+        Some((inner, next.map(|inner| Self(ConsumeOnDrop::new(inner)))))
     }
 }
 
@@ -110,10 +115,22 @@ impl<T> ArcInner<T> {
 
     fn into_inner(self) -> Option<T> {
         let (ref_count, _) = unsafe { &*self.ptr };
-        if ref_count.fetch_sub(1, atomic::Ordering::Release) != 1 {
-            return None;
+        let mut cur_count = ref_count.load(atomic::Ordering::Relaxed);
+        while cur_count > 1 {
+            match ref_count.compare_exchange_weak(
+                cur_count,
+                cur_count - 1,
+                atomic::Ordering::Release,
+                atomic::Ordering::Relaxed,
+            ) {
+                Ok(_) => return None,
+                Err(count) => cur_count = count,
+            }
         }
         let guard = self.pool.0.read();
+        ref_count
+            .compare_exchange(1, 0, atomic::Ordering::Acquire, atomic::Ordering::Relaxed)
+            .unwrap();
         let front_ptr = guard.front().unwrap().front().unwrap();
         if !ptr::addr_eq(front_ptr, self.ptr) {
             return None;
@@ -138,7 +155,11 @@ impl<T> ArcInner<T> {
                 guard.pop_front();
             }
         }
-        result
+        Some(result.unwrap())
+    }
+
+    fn into_inner_and_next(self) -> Option<(T, Option<ArcInner<T>>)> {
+        todo!()
     }
 
     fn get(&self) -> &T {

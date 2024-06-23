@@ -4,6 +4,7 @@ use std::{
 };
 
 use arc_slice_pool::{Arc, ArcIndex, ArcPool};
+use consume_on_drop::{Consume, ConsumeOnDrop};
 use derive_where::derive_where;
 use tokio::sync::watch;
 
@@ -49,12 +50,12 @@ impl<T, C: UnsafeConsumer<T>> Sender<T, C> {
     where
         C: Clone,
     {
-        Receiver {
+        Receiver(ConsumeOnDrop::new(ReceiverInner {
             next_node: self.next_node_tx.borrow().clone(),
             consumer: self.consumer.clone(),
             next_node_rx: self.next_node_tx.subscribe(),
             notify_pool: self.notify_pool.clone(),
-        }
+        }))
     }
 
     pub async fn closed(&self) {
@@ -67,15 +68,53 @@ impl<T, C: UnsafeConsumer<T>> Sender<T, C> {
 }
 
 #[derive_where(Clone; C)]
-pub struct Receiver<T, C: UnsafeConsumer<T> = Safe<DropNormally>> {
+pub struct Receiver<T, C: UnsafeConsumer<T> = Safe<DropNormally>>(
+    ConsumeOnDrop<ReceiverInner<T, C>>,
+);
+
+impl<T, C: UnsafeConsumer<T>> Receiver<T, C> {
+    pub async fn recv(&mut self) -> Option<T> {
+        self.0.recv().await
+    }
+
+    pub fn try_recv(&mut self) -> Result<T, TryRecvError> {
+        self.0.try_recv()
+    }
+
+    pub fn consumer(&self) -> &C {
+        self.0.consumer()
+    }
+}
+
+#[derive_where(Clone; C)]
+struct ReceiverInner<T, C: UnsafeConsumer<T>> {
     next_node: arc_slice_pool::Arc<OnceLock<arc_queue_pool::Arc<T>>>,
     consumer: C,
     next_node_rx: watch::Receiver<arc_slice_pool::Arc<OnceLock<arc_queue_pool::Arc<T>>>>,
     notify_pool: std::sync::Arc<arc_slice_pool::ArcPool<OnceLock<arc_queue_pool::Arc<T>>>>,
 }
 
-impl<T, C: UnsafeConsumer<T>> Receiver<T, C> {
-    pub async fn recv(&mut self) -> Option<T> {
+impl<T, C: UnsafeConsumer<T>> Consume for ReceiverInner<T, C> {
+    fn consume(self) {
+        let Some(node) = arc_slice_pool::Arc::into_inner(self.next_node) else {
+            return;
+        };
+        let Some(mut node) = OnceLock::into_inner(node) else {
+            return;
+        };
+        loop {
+            let Some((val, next_node)) = arc_queue_pool::Arc::into_inner_and_next(node) else {
+                break;
+            };
+            unsafe { self.consumer.consume(val) };
+            let Some(next_node) = next_node else { break };
+            node = next_node
+        }
+    }
+}
+
+impl<T, C: UnsafeConsumer<T>> ReceiverInner<T, C> {
+    async fn recv(&mut self) -> Option<T> {
         self.next_node_rx.mark_unchanged();
         loop {
             if let Some(result) = self.try_next() {
@@ -85,7 +124,7 @@ impl<T, C: UnsafeConsumer<T>> Receiver<T, C> {
         }
     }
 
-    pub fn try_recv(&mut self) -> Result<T, TryRecvError> {
+    fn try_recv(&mut self) -> Result<T, TryRecvError> {
         match self.try_next() {
             Some(result) => return Ok(result),
             None => {
@@ -114,7 +153,7 @@ impl<T, C: UnsafeConsumer<T>> Receiver<T, C> {
         Some(result)
     }
 
-    pub fn consumer(&self) -> &C {
+    fn consumer(&self) -> &C {
         &self.consumer
     }
 }
@@ -158,12 +197,12 @@ pub fn channel_with_consumer<T, C: UnsafeConsumer<T> + Clone>(
         node_pool,
         notify_pool: notify_pool.clone(),
     };
-    let receiver = Receiver {
+    let receiver = Receiver(ConsumeOnDrop::new(ReceiverInner {
         next_node,
         consumer,
         next_node_rx,
         notify_pool,
-    };
+    }));
     (sender, receiver)
 }
 

@@ -69,6 +69,7 @@ version = "0.1.0"
 dependencies = [
  "arc_queue_pool",
  "arc_slice_pool",
+ "consume_on_drop",
  "derive-where",
  "parking_lot",
  "tokio",
