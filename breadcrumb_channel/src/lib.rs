@@ -1,22 +1,23 @@
+use std::{
+    mem::{self, MaybeUninit},
+    sync::OnceLock,
+};
+
 use arc_slice_pool::{Arc, ArcIndex, ArcPool};
-use consume_on_drop::ConsumeOnDrop;
 use derive_where::derive_where;
 use tokio::sync::watch;
 
 use self::consumer::{DropNormally, Safe};
-use self::inner::{ReceiverInner, SenderInner};
-use self::node::Node;
 
 pub use self::consumer::{Consumer, UnsafeConsumer};
-
-mod inner;
-mod node;
 
 pub mod consumer;
 
 pub struct Sender<T, C: UnsafeConsumer<T> = Safe<DropNormally>> {
-    inner: ConsumeOnDrop<SenderInner<T, C>>,
-    notify: watch::Sender<()>,
+    next_node_tx: watch::Sender<arc_slice_pool::Arc<OnceLock<arc_queue_pool::Arc<T>>>>,
+    consumer: C,
+    node_pool: arc_queue_pool::ArcPool<T>,
+    notify_pool: std::sync::Arc<arc_slice_pool::ArcPool<OnceLock<arc_queue_pool::Arc<T>>>>,
 }
 
 impl<T, C: Consumer<T>> Sender<T, Safe<C>> {
@@ -29,11 +30,18 @@ impl<T, C: UnsafeConsumer<T>> Sender<T, C> {
     /// # Safety
     /// The value must be a valid value for the consumer
     pub unsafe fn unsafe_send(&self, value: T) -> Result<(), T> {
-        if self.notify.is_closed() {
+        if self.next_node_tx.is_closed() {
             return Err(value);
         }
-        self.inner.send(value);
-        let _ = self.notify.send(());
+        let node = self.node_pool.alloc(value);
+        let next_node = self.notify_pool.alloc(OnceLock::new());
+        let mut this_node = MaybeUninit::uninit();
+        self.next_node_tx.send_modify(|cur_node| {
+            cur_node.set(node).unwrap_or_else(|_| unreachable!());
+            this_node.write(mem::replace(cur_node, next_node));
+        });
+        let this_node = this_node.assume_init();
+        consume_node(self.consumer(), this_node);
         Ok(())
     }
 
@@ -42,50 +50,89 @@ impl<T, C: UnsafeConsumer<T>> Sender<T, C> {
         C: Clone,
     {
         Receiver {
-            inner: ConsumeOnDrop::new(self.inner.subscribe()),
-            notify: self.notify.subscribe(),
+            next_node: self.next_node_tx.borrow().clone(),
+            consumer: self.consumer.clone(),
+            next_node_rx: self.next_node_tx.subscribe(),
+            notify_pool: self.notify_pool.clone(),
         }
     }
 
     pub async fn closed(&self) {
-        self.notify.closed().await
+        self.next_node_tx.closed().await
     }
 
     pub fn consumer(&self) -> &C {
-        self.inner.consumer()
+        &self.consumer
     }
 }
 
 #[derive_where(Clone; C)]
 pub struct Receiver<T, C: UnsafeConsumer<T> = Safe<DropNormally>> {
-    inner: ConsumeOnDrop<ReceiverInner<T, C>>,
-    notify: watch::Receiver<()>,
+    next_node: arc_slice_pool::Arc<OnceLock<arc_queue_pool::Arc<T>>>,
+    consumer: C,
+    next_node_rx: watch::Receiver<arc_slice_pool::Arc<OnceLock<arc_queue_pool::Arc<T>>>>,
+    notify_pool: std::sync::Arc<arc_slice_pool::ArcPool<OnceLock<arc_queue_pool::Arc<T>>>>,
 }
 
 impl<T, C: UnsafeConsumer<T>> Receiver<T, C> {
     pub async fn recv(&mut self) -> Option<T> {
-        self.notify.mark_unchanged();
+        self.next_node_rx.mark_unchanged();
         loop {
-            if let Some(result) = self.inner.try_next() {
+            if let Some(result) = self.try_next() {
                 return Some(result);
             }
-            self.notify.changed().await.ok()?;
+            self.next_node_rx.changed().await.ok()?;
         }
     }
 
     pub fn try_recv(&mut self) -> Result<T, TryRecvError> {
-        self.inner.try_next().ok_or_else(|| {
-            if self.notify.has_changed().is_err() {
-                TryRecvError::Disconnected
-            } else {
-                TryRecvError::Empty
+        match self.try_next() {
+            Some(result) => return Ok(result),
+            None => {
+                if self.next_node_rx.has_changed().is_err() {
+                    Err(TryRecvError::Disconnected)
+                } else {
+                    Err(TryRecvError::Empty)
+                }
             }
-        })
+        }
+    }
+
+    fn try_next(&mut self) -> Option<T> {
+        let node = self.next_node.get()?;
+        let result = unsafe { self.consumer.clone_value(node) };
+        let sender_next_node = self.next_node_rx.borrow().clone();
+        let next_node = match arc_queue_pool::Arc::next(node) {
+            Some(next_node) => {
+                drop(sender_next_node); // Safe because we still have a clone or earlier node in the queue
+                self.notify_pool.alloc(OnceLock::from(next_node))
+            }
+            None => sender_next_node,
+        };
+        let replaced_node = mem::replace(&mut self.next_node, next_node);
+        unsafe { consume_node(self.consumer(), replaced_node) };
+        Some(result)
     }
 
     pub fn consumer(&self) -> &C {
-        self.inner.consumer()
+        &self.consumer
     }
+}
+
+/// # Safety
+/// Instance of T must be valid for the consumer
+unsafe fn consume_node<T>(
+    consumer: &impl UnsafeConsumer<T>,
+    node: arc_slice_pool::Arc<OnceLock<arc_queue_pool::Arc<T>>>,
+) {
+    let Some(node) = arc_slice_pool::Arc::into_inner(node) else {
+        return;
+    };
+    let node = OnceLock::into_inner(node).unwrap();
+    let Some(value) = arc_queue_pool::Arc::into_inner(node) else {
+        return;
+    };
+    consumer.consume(value)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -101,23 +148,23 @@ pub fn channel<T: Clone>() -> (Sender<T>, Receiver<T>) {
 pub fn channel_with_consumer<T, C: UnsafeConsumer<T> + Clone>(
     consumer: C,
 ) -> (Sender<T, C>, Receiver<T, C>) {
-    let (tx, rx) = watch::channel(());
-    let node_pool = std::sync::Arc::new(ArcPool::new());
-    let initial = node_pool.alloc(Node::default());
-    (
-        Sender {
-            inner: ConsumeOnDrop::new(SenderInner::new(
-                node_pool.clone(),
-                initial.clone(),
-                consumer.clone(),
-            )),
-            notify: tx,
-        },
-        Receiver {
-            inner: ConsumeOnDrop::new(ReceiverInner::new(node_pool, initial, consumer)),
-            notify: rx,
-        },
-    )
+    let node_pool = arc_queue_pool::ArcPool::new();
+    let notify_pool = std::sync::Arc::new(arc_slice_pool::ArcPool::new());
+    let next_node = notify_pool.alloc(OnceLock::new());
+    let (next_node_tx, next_node_rx) = watch::channel(next_node.clone());
+    let sender = Sender {
+        next_node_tx,
+        consumer: consumer.clone(),
+        node_pool,
+        notify_pool: notify_pool.clone(),
+    };
+    let receiver = Receiver {
+        next_node,
+        consumer,
+        next_node_rx,
+        notify_pool,
+    };
+    (sender, receiver)
 }
 
 pub struct ArcSender<T>(Sender<ArcIndex, std::sync::Arc<ArcPool<T>>>);

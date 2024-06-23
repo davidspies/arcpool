@@ -18,6 +18,9 @@
             "label": "cargo test",
             "type": "cargo",
             "command": "cargo",
+            "env": {
+                "RUST_BACKTRACE": "1"
+            },
             "args": [
                 "test",
                 "--all-features",

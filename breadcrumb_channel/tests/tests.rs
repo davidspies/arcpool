@@ -39,7 +39,7 @@ impl Clone for DropTracker {
 }
 
 #[tokio::test]
-async fn test_send_and_recv() {
+async fn send_and_recv() {
     let (sender, mut receiver) = channel();
 
     // Send a value through the channel
@@ -50,7 +50,7 @@ async fn test_send_and_recv() {
 }
 
 #[tokio::test]
-async fn test_multiple_receivers() {
+async fn multiple_receivers() {
     let (sender, mut receiver1) = channel();
     let mut receiver2 = sender.subscribe();
 
@@ -65,7 +65,7 @@ async fn test_multiple_receivers() {
 }
 
 #[tokio::test]
-async fn test_receiver_disconnected() {
+async fn receiver_disconnected() {
     let (sender, receiver) = channel::<&str>();
 
     // Drop the receiver
@@ -76,7 +76,7 @@ async fn test_receiver_disconnected() {
 }
 
 #[tokio::test]
-async fn test_try_recv() {
+async fn try_recv() {
     let (sender, mut receiver) = channel();
 
     // Sending a value
@@ -96,7 +96,7 @@ async fn test_try_recv() {
 }
 
 #[tokio::test]
-async fn test_sent_and_received_value_dropped() {
+async fn sent_and_received_value_dropped() {
     let (sender, mut receiver) = channel();
     let tracker = DropTracker::new();
 
@@ -111,7 +111,7 @@ async fn test_sent_and_received_value_dropped() {
 }
 
 #[tokio::test]
-async fn test_sent_and_not_received_value_dropped() {
+async fn sent_and_not_received_value_dropped() {
     let (sender, receiver) = channel::<DropTracker>();
     let tracker = DropTracker::new();
 

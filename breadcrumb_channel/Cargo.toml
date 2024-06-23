@@ -4,11 +4,11 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-consume_on_drop = "*"
 derive-where = "*"
 parking_lot = "*"
 tokio = { version = "*", features = ["sync"] }
 
+arc_queue_pool = { path = "../arc_queue_pool" }
 arc_slice_pool = { path = "../arc_slice_pool" }
 
 [dev-dependencies]

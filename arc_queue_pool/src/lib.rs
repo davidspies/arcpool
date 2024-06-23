@@ -5,6 +5,7 @@ use std::{
     sync::atomic::{self, AtomicUsize},
 };
 
+use consume_on_drop::{Consume, ConsumeOnDrop};
 use derive_where::derive_where;
 use parking_lot::RwLock;
 use stable_queue::{StableIndex, StableQueue};
@@ -37,36 +38,57 @@ impl<T> ArcPool<T> {
                     .unwrap_or_else(|_| unreachable!())
             }
         };
-        Arc {
+        Arc(ConsumeOnDrop::new(ArcInner {
             pool: self.clone(),
             ptr: &back_queue[index],
             index,
-        }
+        }))
     }
 }
 
-pub struct Arc<T> {
+#[derive_where(Clone)]
+pub struct Arc<T>(ConsumeOnDrop<ArcInner<T>>);
+
+impl<T> Arc<T> {
+    pub fn next(this: &Self) -> Option<Self> {
+        this.0.next().map(|inner| Arc(ConsumeOnDrop::new(inner)))
+    }
+
+    pub fn into_inner(this: Self) -> Option<T> {
+        ConsumeOnDrop::into_inner(this.0).into_inner()
+    }
+}
+
+impl<T> Deref for Arc<T> {
+    type Target = T;
+
+    fn deref(&self) -> &T {
+        self.0.get()
+    }
+}
+
+struct ArcInner<T> {
     pool: ArcPool<T>,
     ptr: *const (AtomicUsize, T),
     index: StableIndex,
 }
 
-impl<T> Arc<T> {
-    pub fn next(this: &Self) -> Option<Self> {
-        let guard = this.pool.0.read();
+impl<T> ArcInner<T> {
+    fn next(&self) -> Option<Self> {
+        let guard = self.pool.0.read();
         let (my_queue_ind, my_queue) = guard
             .iter()
             .enumerate()
             .rev()
             .find(|(_i, queue)| {
                 queue
-                    .get(this.index)
-                    .is_some_and(|item| ptr::addr_eq(item, this.ptr))
+                    .get(self.index)
+                    .is_some_and(|item| ptr::addr_eq(item, self.ptr))
             })
             .unwrap();
         let next_queue;
         let next_idx;
-        match my_queue.increment_index(this.index) {
+        match my_queue.increment_index(self.index) {
             Some(new_idx) => {
                 next_queue = my_queue;
                 next_idx = new_idx;
@@ -79,47 +101,25 @@ impl<T> Arc<T> {
         let next_ptr = &next_queue[next_idx];
         let (ref_count, _value) = next_ptr;
         ref_count.fetch_add(1, atomic::Ordering::Relaxed);
-        Some(Arc {
-            pool: this.pool.clone(),
+        Some(ArcInner {
+            pool: self.pool.clone(),
             ptr: next_ptr,
             index: next_idx,
         })
     }
-}
 
-impl<T> Deref for Arc<T> {
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        let (_, value) = unsafe { &*self.ptr };
-        value
-    }
-}
-
-impl<T> Clone for Arc<T> {
-    fn clone(&self) -> Self {
-        let (ref_count, _) = unsafe { &*self.ptr };
-        ref_count.fetch_add(1, atomic::Ordering::Relaxed);
-        Arc {
-            pool: self.pool.clone(),
-            ptr: self.ptr,
-            index: self.index,
-        }
-    }
-}
-
-impl<T> Drop for Arc<T> {
-    fn drop(&mut self) {
+    fn into_inner(self) -> Option<T> {
         let (ref_count, _) = unsafe { &*self.ptr };
         if ref_count.fetch_sub(1, atomic::Ordering::Release) != 1 {
-            return;
+            return None;
         }
         let guard = self.pool.0.read();
         let front_ptr = guard.front().unwrap().front().unwrap();
         if !ptr::addr_eq(front_ptr, self.ptr) {
-            return;
+            return None;
         }
         drop(guard);
+        let mut result = None;
         let mut guard = self.pool.0.write();
         loop {
             let front_queue = guard.front_mut().unwrap();
@@ -129,7 +129,8 @@ impl<T> Drop for Arc<T> {
             if refcount.load(atomic::Ordering::Acquire) != 0 {
                 break;
             }
-            front_queue.pop_front().unwrap();
+            let (_refcount, val) = front_queue.pop_front().unwrap();
+            result.get_or_insert(val);
             if front_queue.is_empty() {
                 if guard.len() == 1 {
                     break;
@@ -137,6 +138,30 @@ impl<T> Drop for Arc<T> {
                 guard.pop_front();
             }
         }
+        result
+    }
+
+    fn get(&self) -> &T {
+        let (_, value) = unsafe { &*self.ptr };
+        value
+    }
+}
+
+impl<T> Clone for ArcInner<T> {
+    fn clone(&self) -> Self {
+        let (ref_count, _) = unsafe { &*self.ptr };
+        ref_count.fetch_add(1, atomic::Ordering::Relaxed);
+        ArcInner {
+            pool: self.pool.clone(),
+            ptr: self.ptr,
+            index: self.index,
+        }
+    }
+}
+
+impl<T> Consume for ArcInner<T> {
+    fn consume(self) {
+        self.into_inner();
     }
 }
 

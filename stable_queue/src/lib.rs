@@ -31,7 +31,9 @@ impl<T> StableQueue<T> {
         if self.len() == self.capacity() {
             return Err(value);
         }
-        let i = self.back_idx();
+        let i = self
+            .back_idx()
+            .map_or(self.head, |i| self.increment_helper(i));
         self.inner.push_back(value);
         Ok(i)
     }
@@ -76,7 +78,7 @@ impl<T> StableQueue<T> {
 
     /// Undefined behavior for a StableIndex that came from a different StableQueue
     pub fn increment_index(&self, idx: StableIndex) -> Option<StableIndex> {
-        if idx == self.back_idx() {
+        if Some(idx) == self.back_idx() {
             None
         } else {
             Some(self.increment_helper(idx))
@@ -99,14 +101,18 @@ impl<T> StableQueue<T> {
         }
     }
 
-    pub fn back_idx(&self) -> StableIndex {
+    pub fn back_idx(&self) -> Option<StableIndex> {
+        if self.is_empty() {
+            return None;
+        }
         let StableIndex(head) = self.head;
-        let i = if self.capacity() - head < self.len() {
-            head.wrapping_add(self.len()).wrapping_sub(self.capacity())
+        let i = if self.capacity() - head < self.len() - 1 {
+            head.wrapping_add(self.len() - 1)
+                .wrapping_sub(self.capacity())
         } else {
-            head + self.len()
+            head + (self.len() - 1)
         };
-        StableIndex(i)
+        Some(StableIndex(i))
     }
 }
 
