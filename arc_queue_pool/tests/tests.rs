@@ -56,7 +56,7 @@ fn arc_into_inner() {
     let counter = DropCounter::new();
     {
         let arc = pool.alloc(counter.clone());
-        let _inner = Arc::into_inner(arc).unwrap();
+        let _inner = Arc::into_inner_and_next(arc).unwrap();
     } // _inner is dropped here
     assert_eq!(counter.count(), 1);
 }
@@ -82,7 +82,8 @@ fn threaded_usage() {
             thread::spawn(move || {
                 let arc = pool.alloc(i);
                 assert_eq!(*arc, i);
-                Arc::into_inner(arc)
+                let (inner, _next) = Arc::into_inner_and_next(arc)?;
+                Some(inner)
             })
         })
         .collect();

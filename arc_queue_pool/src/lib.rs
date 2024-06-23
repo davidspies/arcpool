@@ -54,10 +54,6 @@ impl<T> Arc<T> {
         this.0.next().map(|inner| Self(ConsumeOnDrop::new(inner)))
     }
 
-    pub fn into_inner(this: Self) -> Option<T> {
-        ConsumeOnDrop::into_inner(this.0).into_inner()
-    }
-
     pub fn into_inner_and_next(this: Self) -> Option<(T, Option<Self>)> {
         let (inner, next) = ConsumeOnDrop::into_inner(this.0).into_inner_and_next()?;
         Some((inner, next.map(|inner| Self(ConsumeOnDrop::new(inner)))))
@@ -111,51 +107,6 @@ impl<T> ArcInner<T> {
             ptr: next_ptr,
             index: next_idx,
         })
-    }
-
-    fn into_inner(self) -> Option<T> {
-        let (ref_count, _) = unsafe { &*self.ptr };
-        let mut cur_count = ref_count.load(atomic::Ordering::Relaxed);
-        while cur_count > 1 {
-            match ref_count.compare_exchange_weak(
-                cur_count,
-                cur_count - 1,
-                atomic::Ordering::Release,
-                atomic::Ordering::Relaxed,
-            ) {
-                Ok(_) => return None,
-                Err(count) => cur_count = count,
-            }
-        }
-        let guard = self.pool.0.read();
-        ref_count
-            .compare_exchange(1, 0, atomic::Ordering::Acquire, atomic::Ordering::Relaxed)
-            .unwrap();
-        let front_ptr = guard.front().unwrap().front().unwrap();
-        if !ptr::addr_eq(front_ptr, self.ptr) {
-            return None;
-        }
-        drop(guard);
-        let mut result = None;
-        let mut guard = self.pool.0.write();
-        loop {
-            let front_queue = guard.front_mut().unwrap();
-            let Some((refcount, _val)) = front_queue.front() else {
-                break;
-            };
-            if refcount.load(atomic::Ordering::Acquire) != 0 {
-                break;
-            }
-            let (_refcount, val) = front_queue.pop_front().unwrap();
-            result.get_or_insert(val);
-            if front_queue.is_empty() {
-                if guard.len() == 1 {
-                    break;
-                }
-                guard.pop_front();
-            }
-        }
-        Some(result.unwrap())
     }
 
     fn into_inner_and_next(self) -> Option<(T, Option<ArcInner<T>>)> {
@@ -227,7 +178,34 @@ impl<T> Clone for ArcInner<T> {
 
 impl<T> Consume for ArcInner<T> {
     fn consume(self) {
-        self.into_inner();
+        let (ref_count, _) = unsafe { &*self.ptr };
+        if ref_count.fetch_sub(1, atomic::Ordering::Release) > 1 {
+            return;
+        }
+        let guard = self.pool.0.read();
+        let front_ptr = guard.front().unwrap().front();
+        if !front_ptr.is_some_and(|ptr| ptr::addr_eq(ptr, self.ptr)) {
+            return;
+        }
+        drop(guard);
+        let mut guard = self.pool.0.write();
+        loop {
+            let front_queue = guard.front_mut().unwrap();
+            let Some((refcount, _val)) = front_queue.front() else {
+                break;
+            };
+            if refcount.load(atomic::Ordering::Acquire) > 0 {
+                break;
+            }
+            let (_refcount, val) = front_queue.pop_front().unwrap();
+            drop(val);
+            if front_queue.is_empty() {
+                if guard.len() == 1 {
+                    break;
+                }
+                guard.pop_front();
+            }
+        }
     }
 }
 

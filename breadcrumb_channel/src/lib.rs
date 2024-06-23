@@ -143,7 +143,7 @@ impl<T, C: UnsafeConsumer<T>> ReceiverInner<T, C> {
         let sender_next_node = self.next_node_rx.borrow().clone();
         let next_node = match arc_queue_pool::Arc::next(node) {
             Some(next_node) => {
-                drop(sender_next_node); // Safe because we still have a clone or earlier node in the queue
+                unsafe { consume_node(self.consumer(), sender_next_node) };
                 self.notify_pool.alloc(OnceLock::from(next_node))
             }
             None => sender_next_node,
@@ -167,11 +167,17 @@ unsafe fn consume_node<T>(
     let Some(node) = arc_slice_pool::Arc::into_inner(node) else {
         return;
     };
-    let node = OnceLock::into_inner(node).unwrap();
-    let Some(value) = arc_queue_pool::Arc::into_inner(node) else {
-        return;
-    };
-    consumer.consume(value)
+    let mut node = OnceLock::into_inner(node).unwrap();
+    loop {
+        let Some((value, next)) = arc_queue_pool::Arc::into_inner_and_next(node) else {
+            return;
+        };
+        consumer.consume(value);
+        match next {
+            Some(next) => node = next,
+            None => break,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
