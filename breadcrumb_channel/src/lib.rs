@@ -139,18 +139,37 @@ impl<T, C: UnsafeConsumer<T>> ReceiverInner<T, C> {
 
     fn try_next(&mut self) -> Option<T> {
         let node = self.next_node.get()?;
-        let result = unsafe { self.consumer.clone_value(node) };
         let sender_next_node = self.next_node_rx.borrow().clone();
         let next_node = match arc_queue_pool::Arc::next(node) {
-            Some(next_node) => {
-                unsafe { consume_node(self.consumer(), sender_next_node) };
-                self.notify_pool.alloc(OnceLock::from(next_node))
-            }
+            Some(next_node) => self.notify_pool.alloc(OnceLock::from(next_node)),
             None => sender_next_node,
         };
         let replaced_node = mem::replace(&mut self.next_node, next_node);
-        unsafe { consume_node(self.consumer(), replaced_node) };
-        Some(result)
+        match arc_slice_pool::Arc::try_unwrap(replaced_node) {
+            Ok(replaced_node) => {
+                let inner_node = replaced_node.into_inner().unwrap();
+                match arc_queue_pool::Arc::try_unwrap_and_next(inner_node) {
+                    Ok((result, _next_inner_node)) => Some(result),
+                    Err(inner_node) => {
+                        let result = unsafe { self.consumer.clone_value(&inner_node) };
+                        // Handles unlikely race condition where the remaining instances of the inner node
+                        // are dropped while we're cloning the value:
+                        if let Some((inner_value, _next_inner_node)) =
+                            arc_queue_pool::Arc::into_inner_and_next(inner_node)
+                        {
+                            unsafe { self.consumer.consume(inner_value) };
+                        }
+                        Some(result)
+                    }
+                }
+            }
+            Err(replaced_node) => {
+                let inner_node = replaced_node.get().unwrap();
+                let result = unsafe { self.consumer.clone_value(inner_node) };
+                unsafe { consume_node(self.consumer(), replaced_node) };
+                Some(result)
+            }
+        }
     }
 
     fn consumer(&self) -> &C {
@@ -167,19 +186,12 @@ unsafe fn consume_node<T>(
     let Some(node) = arc_slice_pool::Arc::into_inner(node) else {
         return;
     };
-    let Some(mut node) = OnceLock::into_inner(node) else {
+    let node = OnceLock::into_inner(node).unwrap();
+    let Some((value, next)) = arc_queue_pool::Arc::into_inner_and_next(node) else {
         return;
     };
-    loop {
-        let Some((value, next)) = arc_queue_pool::Arc::into_inner_and_next(node) else {
-            return;
-        };
-        consumer.consume(value);
-        match next {
-            Some(next) => node = next,
-            None => break,
-        }
-    }
+    consumer.consume(value);
+    debug_assert!(!next.is_some_and(|next| arc_queue_pool::Arc::ref_count(&next) == 1));
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -74,6 +74,16 @@ impl<T> Arc<T> {
         ConsumeOnDrop::into_inner(inner).into_inner()
     }
 
+    pub fn try_unwrap(Self { inner, _phantom }: Self) -> Result<T, Self> {
+        match ConsumeOnDrop::into_inner(inner).try_unwrap() {
+            Ok(value) => Ok(value),
+            Err(inner) => Err(Self {
+                inner: ConsumeOnDrop::new(inner),
+                _phantom,
+            }),
+        }
+    }
+
     pub fn into_index(self) -> ArcIndex {
         ArcInner::into_index(ConsumeOnDrop::into_inner(self.inner))
     }

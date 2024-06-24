@@ -122,6 +122,24 @@ impl<T> ArcInner<T> {
         Some(unsafe { result.assume_init() })
     }
 
+    pub(super) fn try_unwrap(self) -> Result<T, Self> {
+        let (ref_count, _ptr) = &self.pool.mem[self.index];
+        match ref_count.compare_exchange_weak(
+            1,
+            0,
+            atomic::Ordering::Acquire,
+            atomic::Ordering::Relaxed,
+        ) {
+            Ok(_) => {}
+            Err(_) => return Err(self),
+        }
+        let (_ref_count, ptr) = &self.pool.mem[self.index];
+        let ptr = ptr.get();
+        let result = mem::replace(unsafe { &mut *ptr }, MaybeUninit::uninit());
+        self.pool.free_list.lock().push(self.index);
+        Ok(unsafe { result.assume_init() })
+    }
+
     pub(super) fn into_index(this: Self) -> ArcIndex {
         unsafe { std::sync::Arc::increment_strong_count(&this.pool) }
         ArcIndex(this.pool.offset + this.index, ConsumeOnDrop::new(Panicker))
