@@ -167,7 +167,9 @@ unsafe fn consume_node<T>(
     let Some(node) = arc_slice_pool::Arc::into_inner(node) else {
         return;
     };
-    let mut node = OnceLock::into_inner(node).unwrap();
+    let Some(mut node) = OnceLock::into_inner(node) else {
+        return;
+    };
     loop {
         let Some((value, next)) = arc_queue_pool::Arc::into_inner_and_next(node) else {
             return;
