@@ -1,5 +1,4 @@
 use std::{
-    collections::VecDeque,
     ops::Deref,
     ptr,
     sync::atomic::{self, AtomicUsize},
@@ -11,7 +10,7 @@ use parking_lot::RwLock;
 use stable_queue::{StableIndex, StableQueue};
 
 #[derive_where(Clone)]
-pub struct ArcPool<T>(std::sync::Arc<RwLock<VecDeque<StableQueue<(AtomicUsize, T)>>>>);
+pub struct ArcPool<T>(std::sync::Arc<RwLock<StableQueue<StableQueue<(AtomicUsize, T)>>>>);
 
 impl<T> ArcPool<T> {
     pub fn new() -> Self {
@@ -19,19 +18,24 @@ impl<T> ArcPool<T> {
     }
 
     pub fn with_capacity(cap: usize) -> Self {
-        Self(std::sync::Arc::new(RwLock::new(VecDeque::from_iter([
-            StableQueue::with_capacity(cap.max(1)),
-        ]))))
+        let mut queue = StableQueue::new_unbounded();
+        queue
+            .push_back(StableQueue::with_fixed_capacity(cap))
+            .unwrap_or_else(|_| unreachable!());
+        Self(std::sync::Arc::new(RwLock::new(queue)))
     }
 
     pub fn alloc(&self, value: T) -> Arc<T> {
         let mut guard = self.0.write();
+        let mut back_idx = guard.back_idx().unwrap();
         let mut back_queue = guard.back_mut().unwrap();
-        let back_cap = back_queue.capacity();
+        let back_cap = back_queue.fixed_capacity().unwrap();
         let index = match back_queue.push_back((AtomicUsize::new(1), value)) {
             Ok(index) => index,
             Err(rejected) => {
-                guard.push_back(StableQueue::with_capacity(back_cap * 2));
+                back_idx = guard
+                    .push_back(StableQueue::with_fixed_capacity(back_cap * 2))
+                    .unwrap_or_else(|_| unreachable!());
                 back_queue = guard.back_mut().unwrap();
                 back_queue
                     .push_back(rejected)
@@ -41,7 +45,8 @@ impl<T> ArcPool<T> {
         Arc(ConsumeOnDrop::new(ArcInner {
             pool: self.clone(),
             ptr: &back_queue[index],
-            index,
+            outer_index: back_idx,
+            inner_index: index,
         }))
     }
 
@@ -57,6 +62,7 @@ impl<T> ArcPool<T> {
             }
             guard.pop_front();
         }
+        let front_queue_idx = guard.front_idx().unwrap();
         let front_queue = guard.front_mut().unwrap();
         let index = front_queue.front_idx().unwrap();
         let next_ptr = front_queue.front().unwrap();
@@ -69,7 +75,8 @@ impl<T> ArcPool<T> {
             Some(ArcInner {
                 pool: self,
                 ptr: next_ptr,
-                index,
+                outer_index: front_queue_idx,
+                inner_index: index,
             }),
         )
     }
@@ -112,41 +119,35 @@ impl<T> Deref for Arc<T> {
 struct ArcInner<T> {
     pool: ArcPool<T>,
     ptr: *const (AtomicUsize, T),
-    index: StableIndex,
+    outer_index: StableIndex,
+    inner_index: StableIndex,
 }
 
 impl<T> ArcInner<T> {
     fn next(&self) -> Option<Self> {
         let guard = self.pool.0.read();
-        let (my_queue_ind, my_queue) = guard
-            .iter()
-            .enumerate()
-            .rev()
-            .find(|(_i, queue)| {
-                queue
-                    .get(self.index)
-                    .is_some_and(|item| ptr::addr_eq(item, self.ptr))
-            })
-            .unwrap();
-        let next_queue;
-        let next_idx;
-        match my_queue.increment_index(self.index) {
-            Some(new_idx) => {
-                next_queue = my_queue;
-                next_idx = new_idx;
+        let new_outer_index;
+        let new_ptr;
+        let mut new_inner_index = self.inner_index.next_idx();
+        match guard[self.outer_index].get(new_inner_index) {
+            Some(ptr) => {
+                new_outer_index = self.outer_index;
+                new_ptr = ptr;
             }
             None => {
-                next_queue = guard.get(my_queue_ind + 1)?;
-                next_idx = next_queue.front_idx().unwrap();
+                new_outer_index = self.outer_index.next_idx();
+                let next_queue = guard.get(new_outer_index)?;
+                new_inner_index = next_queue.front_idx().unwrap();
+                new_ptr = next_queue.front().unwrap();
             }
         }
-        let next_ptr = &next_queue[next_idx];
-        let (ref_count, _value) = next_ptr;
+        let (ref_count, _value) = new_ptr;
         ref_count.fetch_add(1, atomic::Ordering::Relaxed);
         Some(ArcInner {
             pool: self.pool.clone(),
-            ptr: next_ptr,
-            index: next_idx,
+            ptr: new_ptr,
+            outer_index: new_outer_index,
+            inner_index: new_inner_index,
         })
     }
 
@@ -203,12 +204,19 @@ impl<T> ArcInner<T> {
 
 impl<T> Clone for ArcInner<T> {
     fn clone(&self) -> Self {
-        let (ref_count, _) = unsafe { &*self.ptr };
+        let &Self {
+            ref pool,
+            ptr,
+            outer_index,
+            inner_index,
+        } = self;
+        let (ref_count, _) = unsafe { &*ptr };
         ref_count.fetch_add(1, atomic::Ordering::Relaxed);
         ArcInner {
-            pool: self.pool.clone(),
-            ptr: self.ptr,
-            index: self.index,
+            pool: pool.clone(),
+            ptr,
+            outer_index,
+            inner_index,
         }
     }
 }
