@@ -4,7 +4,7 @@ use std::{
     ops::Deref,
     sync::{
         atomic::{self, AtomicUsize},
-        OnceLock,
+        Arc as StdArc, OnceLock, Weak,
     },
 };
 
@@ -25,16 +25,12 @@ pub(super) struct ArcPoolInner<T> {
     free_list: Mutex<Vec<usize>>,
     mem: Box<[(AtomicUsize, UnsafeCell<MaybeUninit<T>>)]>,
     offset: usize,
-    prev: std::sync::Weak<ArcPoolInner<T>>,
-    next: OnceLock<std::sync::Arc<ArcPoolInner<T>>>,
+    prev: Weak<ArcPoolInner<T>>,
+    next: OnceLock<StdArc<ArcPoolInner<T>>>,
 }
 
 impl<T> ArcPoolInner<T> {
-    pub(super) fn with_capacity(
-        cap: usize,
-        offset: usize,
-        prev: std::sync::Weak<ArcPoolInner<T>>,
-    ) -> Self {
+    pub(super) fn with_capacity(cap: usize, offset: usize, prev: Weak<ArcPoolInner<T>>) -> Self {
         let cap = cap.max(1);
         Self {
             free_list: Mutex::new((0..cap).rev().collect()),
@@ -47,7 +43,7 @@ impl<T> ArcPoolInner<T> {
         }
     }
 
-    pub(super) fn try_alloc(self: &std::sync::Arc<Self>, value: T) -> Result<ArcInner<T>, T> {
+    pub(super) fn try_alloc(self: &StdArc<Self>, value: T) -> Result<ArcInner<T>, T> {
         let index = match self.free_list.lock().pop() {
             Some(index) => index,
             None => return Err(value),
@@ -70,7 +66,7 @@ impl<T> ArcPoolInner<T> {
         self.offset
     }
 
-    pub(super) fn set_next(&self, next: std::sync::Arc<ArcPoolInner<T>>) {
+    pub(super) fn set_next(&self, next: StdArc<ArcPoolInner<T>>) {
         self.next
             .set(next)
             .unwrap_or_else(|_| panic!("next already set"))
@@ -78,7 +74,7 @@ impl<T> ArcPoolInner<T> {
 }
 
 pub(super) struct ArcInner<T> {
-    pool: std::sync::Arc<ArcPoolInner<T>>,
+    pool: StdArc<ArcPoolInner<T>>,
     index: usize,
 }
 
@@ -141,25 +137,20 @@ impl<T> ArcInner<T> {
     }
 
     pub(super) fn into_index(this: Self) -> ArcIndex {
-        unsafe { std::sync::Arc::increment_strong_count(&this.pool) }
+        unsafe { StdArc::increment_strong_count(StdArc::as_ptr(&this.pool)) }
         ArcIndex(this.pool.offset + this.index, ConsumeOnDrop::new(Panicker))
     }
 
-    pub(super) unsafe fn from_index(
-        pool: std::sync::Arc<ArcPoolInner<T>>,
-        index: ArcIndex,
-    ) -> Self {
+    pub(super) unsafe fn from_index(pool: StdArc<ArcPoolInner<T>>, index: ArcIndex) -> Self {
         let result = Self::reconstruct_from_ref(pool, &index);
-        std::sync::Arc::decrement_strong_count(&result.pool);
+        StdArc::decrement_strong_count(StdArc::as_ptr(&result.pool));
         let ArcIndex(_, panicker) = index;
-        let _ = ConsumeOnDrop::into_inner(panicker);
+        let panicker = ConsumeOnDrop::into_inner(panicker);
+        drop(panicker);
         result
     }
 
-    pub(super) unsafe fn clone_from_index(
-        pool: std::sync::Arc<ArcPoolInner<T>>,
-        index: &ArcIndex,
-    ) -> Self {
+    pub(super) unsafe fn clone_from_index(pool: StdArc<ArcPoolInner<T>>, index: &ArcIndex) -> Self {
         let result = Self::reconstruct_from_ref(pool, index);
         let (ref_count, _) = &result.pool.mem[result.index];
         ref_count.fetch_add(1, atomic::Ordering::Relaxed);
@@ -167,14 +158,16 @@ impl<T> ArcInner<T> {
     }
 
     unsafe fn reconstruct_from_ref(
-        mut pool: std::sync::Arc<ArcPoolInner<T>>,
+        mut pool: StdArc<ArcPoolInner<T>>,
         &ArcIndex(index, _): &ArcIndex,
     ) -> Self {
-        while index < pool.offset {
+        let mut offset = pool.offset;
+        while index < offset {
             pool = pool.prev.upgrade().unwrap();
+            offset = pool.offset;
         }
         Self {
-            index: index - pool.offset,
+            index: index - offset,
             pool,
         }
     }
