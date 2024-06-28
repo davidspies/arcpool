@@ -8,7 +8,9 @@ use parking_lot::RwLock;
 use stable_queue::{StableIndex, StableQueue};
 
 #[derive_where(Clone)]
-pub struct ArcPool<T>(StdArc<RwLock<StableQueue<StableQueue<Entry<T>>>>>);
+pub struct ArcPool<T>(StdArc<RwLock<ArcPoolInner<T>>>);
+
+struct ArcPoolInner<T>(StableQueue<StableQueue<Entry<T>>>);
 
 struct Entry<T> {
     refcount: AtomicUsize,
@@ -31,13 +33,13 @@ impl<T> ArcPool<T> {
         queue
             .push_back(StableQueue::with_fixed_capacity(cap))
             .unwrap_or_else(|_| unreachable!());
-        Self(StdArc::new(RwLock::new(queue)))
+        Self(StdArc::new(RwLock::new(ArcPoolInner(queue))))
     }
 
     pub(crate) fn alloc_inner(&self, value: T) -> ArcInner<T> {
         let mut guard = self.0.write();
-        let mut outer_index = guard.back_idx().unwrap();
-        let mut queue = guard.back_mut().unwrap();
+        let mut outer_index = guard.0.back_idx().unwrap();
+        let mut queue = guard.0.back_mut().unwrap();
         let back_cap = queue.fixed_capacity().unwrap();
         let new_entry = Entry {
             refcount: AtomicUsize::new(1),
@@ -47,9 +49,10 @@ impl<T> ArcPool<T> {
             Ok(index) => index,
             Err(rejected) => {
                 outer_index = guard
+                    .0
                     .push_back(StableQueue::with_fixed_capacity(back_cap * 2))
                     .unwrap_or_else(|_| unreachable!());
-                queue = guard.back_mut().unwrap();
+                queue = guard.0.back_mut().unwrap();
                 queue.push_back(rejected).unwrap_or_else(|_| unreachable!())
             }
         };
@@ -65,17 +68,17 @@ impl<T> ArcPool<T> {
 
     fn pop_front_and_arc_next(self) -> (T, Option<ArcInner<T>>) {
         let mut guard = self.0.write();
-        let queue = guard.front_mut().unwrap();
+        let queue = guard.0.front_mut().unwrap();
         let Entry { refcount, value } = queue.pop_front().unwrap();
         debug_assert_eq!(refcount.into_inner(), 0);
         if queue.is_empty() {
-            if guard.len() == 1 {
+            if guard.0.len() == 1 {
                 return (value, None);
             }
-            guard.pop_front();
+            guard.0.pop_front();
         }
-        let outer_index = guard.front_idx().unwrap();
-        let queue = guard.front_mut().unwrap();
+        let outer_index = guard.0.front_idx().unwrap();
+        let queue = guard.0.front_mut().unwrap();
         let inner_index = queue.front_idx().unwrap();
         let ptr = queue.front().unwrap();
         ptr.refcount.fetch_add(1, atomic::Ordering::Relaxed);
@@ -112,14 +115,14 @@ impl<T> ArcInner<T> {
         let new_outer_index;
         let new_ptr;
         let mut new_inner_index = self.data.inner_index.next_idx();
-        match guard[self.data.outer_index].get(new_inner_index) {
+        match guard.0[self.data.outer_index].get(new_inner_index) {
             Some(ptr) => {
                 new_outer_index = self.data.outer_index;
                 new_ptr = ptr;
             }
             None => {
                 new_outer_index = self.data.outer_index.next_idx();
-                let next_queue = guard.get(new_outer_index)?;
+                let next_queue = guard.0.get(new_outer_index)?;
                 new_inner_index = next_queue.front_idx().unwrap();
                 new_ptr = next_queue.front().unwrap();
             }
@@ -153,7 +156,7 @@ impl<T> ArcInner<T> {
         refcount
             .compare_exchange(1, 0, atomic::Ordering::Acquire, atomic::Ordering::Relaxed)
             .unwrap();
-        let front_ptr = guard.front().unwrap().front().unwrap();
+        let front_ptr = guard.0.front().unwrap().front().unwrap();
         if !ptr::addr_eq(front_ptr, self.data.ptr) {
             return None;
         }
@@ -168,7 +171,7 @@ impl<T> ArcInner<T> {
             return Err(self);
         }
         let guard = self.pool.0.read();
-        let front_ptr = guard.front().unwrap().front().unwrap();
+        let front_ptr = guard.0.front().unwrap().front().unwrap();
         if !ptr::addr_eq(front_ptr, self.data.ptr) {
             drop(guard);
             return Err(self);
@@ -225,14 +228,14 @@ impl<T> Consume for ArcInner<T> {
             return;
         }
         let guard = self.pool.0.read();
-        let front_ptr = guard.front().unwrap().front();
+        let front_ptr = guard.0.front().unwrap().front();
         if !front_ptr.is_some_and(|ptr| ptr::addr_eq(ptr, self.data.ptr)) {
             return;
         }
         drop(guard);
         let mut guard = self.pool.0.write();
         loop {
-            let front_queue = guard.front_mut().unwrap();
+            let front_queue = guard.0.front_mut().unwrap();
             let Some(Entry { refcount, value: _ }) = front_queue.front() else {
                 break;
             };
@@ -241,10 +244,10 @@ impl<T> Consume for ArcInner<T> {
             }
             drop(front_queue.pop_front().unwrap());
             if front_queue.is_empty() {
-                if guard.len() == 1 {
+                if guard.0.len() == 1 {
                     break;
                 }
-                guard.pop_front();
+                guard.0.pop_front();
             }
         }
     }
