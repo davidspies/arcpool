@@ -3,11 +3,11 @@ use std::ops::Deref;
 use consume_on_drop::ConsumeOnDrop;
 use derive_where::derive_where;
 
-use self::inner::ArcInner;
+use self::pool::ArcInner;
 
-pub use self::inner::ArcPool;
+pub use self::pool::ArcPool;
 
-mod inner;
+mod pool;
 
 #[derive_where(Clone)]
 pub struct Arc<T>(ConsumeOnDrop<ArcInner<T>>);

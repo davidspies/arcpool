@@ -45,9 +45,9 @@ fn pop_front() {
 #[test]
 fn fixed_capacity_limit() {
     let mut queue = StableQueue::with_fixed_capacity(2);
-    assert!(matches!(queue.push_back(1), Ok(_)));
-    assert!(matches!(queue.push_back(2), Ok(_)));
-    assert!(matches!(queue.push_back(3), Err(_)));
+    assert!(queue.push_back(1).is_ok());
+    assert!(queue.push_back(2).is_ok());
+    assert!(queue.push_back(3).is_err());
     assert_eq!(queue.len(), 2);
 }
 

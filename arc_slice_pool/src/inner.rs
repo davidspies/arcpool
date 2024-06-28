@@ -145,8 +145,7 @@ impl<T> ArcInner<T> {
         let result = Self::reconstruct_from_ref(pool, &index);
         StdArc::decrement_strong_count(StdArc::as_ptr(&result.pool));
         let ArcIndex(_, panicker) = index;
-        let panicker = ConsumeOnDrop::into_inner(panicker);
-        drop(panicker);
+        let _panicker = ConsumeOnDrop::into_inner(panicker);
         result
     }
 
