@@ -3,7 +3,7 @@ use std::{
     ops::{Index, IndexMut},
 };
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct StableIndex(usize);
 impl StableIndex {
     pub fn next_idx(self) -> StableIndex {
@@ -75,12 +75,18 @@ impl<T> StableQueue<T> {
 
     pub fn get(&self, StableIndex(physical_idx): StableIndex) -> Option<&T> {
         let StableIndex(head) = self.head;
+        if physical_idx < head {
+            return None;
+        }
         let ind = physical_idx - head;
         self.inner.get(ind)
     }
 
     pub fn get_mut(&mut self, StableIndex(physical_idx): StableIndex) -> Option<&mut T> {
         let StableIndex(head) = self.head;
+        if physical_idx < head {
+            return None;
+        }
         let ind = physical_idx - head;
         self.inner.get_mut(ind)
     }

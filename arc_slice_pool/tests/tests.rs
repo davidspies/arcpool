@@ -111,7 +111,7 @@ fn arc_pool_thread_safety() {
 }
 
 #[test]
-fn test_arc_from_index_after_growth() {
+fn arc_from_index_after_growth() {
     let pool = ArcPool::with_capacity(2); // Start with a small capacity
 
     // Create initial Arcs and save their indices
