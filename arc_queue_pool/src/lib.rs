@@ -1,8 +1,6 @@
-use std::{
-    ops::Deref,
-    ptr,
-    sync::atomic::{self, AtomicUsize},
-};
+use std::sync::atomic::{self, AtomicUsize};
+use std::sync::Arc as StdArc;
+use std::{ops::Deref, ptr};
 
 use consume_on_drop::{Consume, ConsumeOnDrop};
 use derive_where::derive_where;
@@ -10,11 +8,22 @@ use parking_lot::RwLock;
 use stable_queue::{StableIndex, StableQueue};
 
 #[derive_where(Clone)]
-pub struct ArcPool<T>(std::sync::Arc<RwLock<StableQueue<StableQueue<(AtomicUsize, T)>>>>);
+pub struct ArcPool<T>(StdArc<RwLock<StableQueue<StableQueue<Entry<T>>>>>);
+
+struct Entry<T> {
+    refcount: AtomicUsize,
+    value: T,
+}
+
+impl<T> Default for ArcPool<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl<T> ArcPool<T> {
     pub fn new() -> Self {
-        Self::with_capacity(8)
+        Self::with_capacity(1)
     }
 
     pub fn with_capacity(cap: usize) -> Self {
@@ -22,61 +31,61 @@ impl<T> ArcPool<T> {
         queue
             .push_back(StableQueue::with_fixed_capacity(cap))
             .unwrap_or_else(|_| unreachable!());
-        Self(std::sync::Arc::new(RwLock::new(queue)))
+        Self(StdArc::new(RwLock::new(queue)))
     }
 
     pub fn alloc(&self, value: T) -> Arc<T> {
         let mut guard = self.0.write();
-        let mut back_idx = guard.back_idx().unwrap();
-        let mut back_queue = guard.back_mut().unwrap();
-        let back_cap = back_queue.fixed_capacity().unwrap();
-        let index = match back_queue.push_back((AtomicUsize::new(1), value)) {
+        let mut outer_index = guard.back_idx().unwrap();
+        let mut queue = guard.back_mut().unwrap();
+        let back_cap = queue.fixed_capacity().unwrap();
+        let new_entry = Entry {
+            refcount: AtomicUsize::new(1),
+            value,
+        };
+        let inner_index = match queue.push_back(new_entry) {
             Ok(index) => index,
             Err(rejected) => {
-                back_idx = guard
+                outer_index = guard
                     .push_back(StableQueue::with_fixed_capacity(back_cap * 2))
                     .unwrap_or_else(|_| unreachable!());
-                back_queue = guard.back_mut().unwrap();
-                back_queue
-                    .push_back(rejected)
-                    .unwrap_or_else(|_| unreachable!())
+                queue = guard.back_mut().unwrap();
+                queue.push_back(rejected).unwrap_or_else(|_| unreachable!())
             }
         };
         Arc(ConsumeOnDrop::new(ArcInner {
             pool: self.clone(),
-            ptr: &back_queue[index],
-            outer_index: back_idx,
-            inner_index: index,
+            ptr: &queue[inner_index],
+            outer_index,
+            inner_index,
         }))
     }
 
     fn pop_front_and_arc_next(self) -> (T, Option<ArcInner<T>>) {
         let mut guard = self.0.write();
-        let front_queue = guard.front_mut().unwrap();
-        let (refcount, _val) = front_queue.front().unwrap();
-        debug_assert_eq!(refcount.load(atomic::Ordering::Relaxed), 0);
-        let (_refcount, result) = front_queue.pop_front().unwrap();
-        if front_queue.is_empty() {
+        let queue = guard.front_mut().unwrap();
+        let Entry { refcount, value } = queue.pop_front().unwrap();
+        debug_assert_eq!(refcount.into_inner(), 0);
+        if queue.is_empty() {
             if guard.len() == 1 {
-                return (result, None);
+                return (value, None);
             }
             guard.pop_front();
         }
-        let front_queue_idx = guard.front_idx().unwrap();
-        let front_queue = guard.front_mut().unwrap();
-        let index = front_queue.front_idx().unwrap();
-        let next_ptr = front_queue.front().unwrap();
-        let (ref_count, _value) = next_ptr;
-        let next_ptr = next_ptr as *const _;
-        ref_count.fetch_add(1, atomic::Ordering::Relaxed);
+        let outer_index = guard.front_idx().unwrap();
+        let queue = guard.front_mut().unwrap();
+        let inner_index = queue.front_idx().unwrap();
+        let ptr = queue.front().unwrap();
+        ptr.refcount.fetch_add(1, atomic::Ordering::Relaxed);
+        let ptr = ptr as *const _;
         drop(guard);
         (
-            result,
+            value,
             Some(ArcInner {
                 pool: self,
-                ptr: next_ptr,
-                outer_index: front_queue_idx,
-                inner_index: index,
+                ptr,
+                outer_index,
+                inner_index,
             }),
         )
     }
@@ -103,8 +112,9 @@ impl<T> Arc<T> {
     }
 
     pub fn ref_count(this: &Self) -> usize {
-        let (ref_count, _) = unsafe { &*this.0.ptr };
-        ref_count.load(atomic::Ordering::Relaxed)
+        unsafe { &*this.0.ptr }
+            .refcount
+            .load(atomic::Ordering::Relaxed)
     }
 }
 
@@ -118,7 +128,7 @@ impl<T> Deref for Arc<T> {
 
 struct ArcInner<T> {
     pool: ArcPool<T>,
-    ptr: *const (AtomicUsize, T),
+    ptr: *const Entry<T>,
     outer_index: StableIndex,
     inner_index: StableIndex,
 }
@@ -141,8 +151,7 @@ impl<T> ArcInner<T> {
                 new_ptr = next_queue.front().unwrap();
             }
         }
-        let (ref_count, _value) = new_ptr;
-        ref_count.fetch_add(1, atomic::Ordering::Relaxed);
+        new_ptr.refcount.fetch_add(1, atomic::Ordering::Relaxed);
         Some(ArcInner {
             pool: self.pool.clone(),
             ptr: new_ptr,
@@ -152,10 +161,10 @@ impl<T> ArcInner<T> {
     }
 
     fn into_inner_and_next(self) -> Option<(T, Option<ArcInner<T>>)> {
-        let (ref_count, _) = unsafe { &*self.ptr };
-        let mut cur_count = ref_count.load(atomic::Ordering::Relaxed);
+        let Entry { refcount, value: _ } = unsafe { &*self.ptr };
+        let mut cur_count = refcount.load(atomic::Ordering::Relaxed);
         while cur_count > 1 {
-            match ref_count.compare_exchange_weak(
+            match refcount.compare_exchange_weak(
                 cur_count,
                 cur_count - 1,
                 atomic::Ordering::Release,
@@ -166,7 +175,7 @@ impl<T> ArcInner<T> {
             }
         }
         let guard = self.pool.0.read();
-        ref_count
+        refcount
             .compare_exchange(1, 0, atomic::Ordering::Acquire, atomic::Ordering::Relaxed)
             .unwrap();
         let front_ptr = guard.front().unwrap().front().unwrap();
@@ -178,8 +187,8 @@ impl<T> ArcInner<T> {
     }
 
     fn try_unwrap_and_next(self) -> Result<(T, Option<ArcInner<T>>), ArcInner<T>> {
-        let (ref_count, _) = unsafe { &*self.ptr };
-        let cur_count = ref_count.load(atomic::Ordering::Relaxed);
+        let Entry { refcount, value: _ } = unsafe { &*self.ptr };
+        let cur_count = refcount.load(atomic::Ordering::Relaxed);
         if cur_count > 1 {
             return Err(self);
         }
@@ -190,15 +199,14 @@ impl<T> ArcInner<T> {
             return Err(self);
         }
         drop(guard);
-        ref_count
+        refcount
             .compare_exchange(1, 0, atomic::Ordering::Acquire, atomic::Ordering::Relaxed)
             .unwrap();
         Ok(self.pool.pop_front_and_arc_next())
     }
 
     fn get(&self) -> &T {
-        let (_, value) = unsafe { &*self.ptr };
-        value
+        &unsafe { &*self.ptr }.value
     }
 }
 
@@ -210,8 +218,9 @@ impl<T> Clone for ArcInner<T> {
             outer_index,
             inner_index,
         } = self;
-        let (ref_count, _) = unsafe { &*ptr };
-        ref_count.fetch_add(1, atomic::Ordering::Relaxed);
+        unsafe { &*ptr }
+            .refcount
+            .fetch_add(1, atomic::Ordering::Relaxed);
         ArcInner {
             pool: pool.clone(),
             ptr,
@@ -223,8 +232,10 @@ impl<T> Clone for ArcInner<T> {
 
 impl<T> Consume for ArcInner<T> {
     fn consume(self) {
-        let (ref_count, _) = unsafe { &*self.ptr };
-        if ref_count.fetch_sub(1, atomic::Ordering::Release) > 1 {
+        let old_count = unsafe { &*self.ptr }
+            .refcount
+            .fetch_sub(1, atomic::Ordering::Release);
+        if old_count > 1 {
             return;
         }
         let guard = self.pool.0.read();
@@ -236,14 +247,13 @@ impl<T> Consume for ArcInner<T> {
         let mut guard = self.pool.0.write();
         loop {
             let front_queue = guard.front_mut().unwrap();
-            let Some((refcount, _val)) = front_queue.front() else {
+            let Some(Entry { refcount, value: _ }) = front_queue.front() else {
                 break;
             };
             if refcount.load(atomic::Ordering::Acquire) > 0 {
                 break;
             }
-            let (_refcount, val) = front_queue.pop_front().unwrap();
-            drop(val);
+            drop(front_queue.pop_front().unwrap());
             if front_queue.is_empty() {
                 if guard.len() == 1 {
                     break;

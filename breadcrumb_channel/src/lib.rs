@@ -126,7 +126,7 @@ impl<T, C: UnsafeConsumer<T>> ReceiverInner<T, C> {
 
     fn try_recv(&mut self) -> Result<T, TryRecvError> {
         match self.try_next() {
-            Some(result) => return Ok(result),
+            Some(result) => Ok(result),
             None => {
                 if self.next_node_rx.has_changed().is_err() {
                     Err(TryRecvError::Disconnected)

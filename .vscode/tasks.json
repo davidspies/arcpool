@@ -6,9 +6,8 @@
         {
             "label": "cargo check",
             "type": "cargo",
-            "command": "cargo",
+            "command": "check",
             "args": [
-                "check",
                 "--all-features",
                 "--all-targets"
             ],
@@ -17,12 +16,11 @@
         {
             "label": "cargo test",
             "type": "cargo",
-            "command": "cargo",
+            "command": "test",
             "env": {
                 "RUST_BACKTRACE": "1"
             },
             "args": [
-                "test",
                 "--all-features",
                 "--all-targets"
             ],
@@ -31,11 +29,21 @@
         {
             "label": "cargo clippy",
             "type": "cargo",
-            "command": "cargo",
+            "command": "clippy",
             "args": [
-                "clippy",
                 "--all-features",
                 "--all-targets"
+            ],
+            "group": "build"
+        },
+        {
+            "label": "cargo llvm-cov",
+            "type": "cargo",
+            "command": "llvm-cov",
+            "args": [
+                "--all-features",
+                "--all-targets",
+                "--html"
             ],
             "group": "build"
         }
