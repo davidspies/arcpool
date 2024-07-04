@@ -94,6 +94,10 @@ impl<T> Arc<T> {
         ArcInner::into_index(ConsumeOnDrop::into_inner(self.inner))
     }
 
+    pub fn ptr_eq(this: &Self, other: &Self) -> bool {
+        ArcInner::ptr_eq(&this.inner, &other.inner)
+    }
+
     /// # Safety
     /// Must be the same pool as the one that created the Arc
     pub unsafe fn from_index(pool: &ArcPool<T>, index: ArcIndex) -> Self {

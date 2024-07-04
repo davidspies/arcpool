@@ -156,6 +156,10 @@ impl<T> ArcInner<T> {
         result
     }
 
+    pub(super) fn ptr_eq(&self, other: &Self) -> bool {
+        StdArc::ptr_eq(&self.pool, &other.pool) && self.index == other.index
+    }
+
     unsafe fn reconstruct_from_ref(
         mut pool: StdArc<ArcPoolInner<T>>,
         &ArcIndex(index, _): &ArcIndex,

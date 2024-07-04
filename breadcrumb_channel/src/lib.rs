@@ -227,6 +227,8 @@ pub fn channel_with_consumer<T, C: UnsafeConsumer<T> + Clone>(
 }
 
 pub struct ArcSender<T>(Sender<ArcIndex, std::sync::Arc<ArcPool<T>>>);
+
+#[derive_where(Clone)]
 pub struct ArcReceiver<T>(Receiver<ArcIndex, std::sync::Arc<ArcPool<T>>>);
 
 pub fn arc_channel<T>() -> (ArcSender<T>, ArcReceiver<T>) {
