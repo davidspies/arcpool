@@ -1,3 +1,6 @@
+use std::cmp::Ordering;
+use std::fmt::{self, Debug, Formatter};
+use std::hash::{Hash, Hasher};
 use std::ops::Deref;
 
 use consume_on_drop::ConsumeOnDrop;
@@ -50,3 +53,35 @@ impl<T> Deref for Arc<T> {
 
 unsafe impl<T: Send + Sync> Send for Arc<T> {}
 unsafe impl<T: Send + Sync> Sync for Arc<T> {}
+
+impl<T: Debug> Debug for Arc<T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        (**self).fmt(f)
+    }
+}
+
+impl<T: Hash> Hash for Arc<T> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        (**self).hash(state)
+    }
+}
+
+impl<T: PartialEq> PartialEq for Arc<T> {
+    fn eq(&self, other: &Self) -> bool {
+        **self == **other
+    }
+}
+
+impl<T: Eq> Eq for Arc<T> {}
+
+impl<T: PartialOrd> PartialOrd for Arc<T> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        (**self).partial_cmp(&**other)
+    }
+}
+
+impl<T: Ord> Ord for Arc<T> {
+    fn cmp(&self, other: &Self) -> Ordering {
+        (**self).cmp(&**other)
+    }
+}
