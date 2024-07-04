@@ -40,15 +40,23 @@ impl<T> ArcPool<T> {
         if cur_count > 1 {
             return None;
         }
-        self.pop_front_and_arc_next(data).map(|(value, data)| {
-            (
-                value,
-                data.map(|data| ArcInner {
-                    pool: self.clone(),
-                    data,
-                }),
-            )
-        })
+        let guard = self.0.read();
+        let front_ptr = guard.front_entry().unwrap();
+        if !ptr::addr_eq(front_ptr, data.ptr()) {
+            return None;
+        }
+        drop(guard);
+        data.refcount()
+            .compare_exchange(1, 0, atomic::Ordering::Acquire, atomic::Ordering::Relaxed)
+            .unwrap();
+        let (value, data) = self.0.write().pop_front_and_arc_next();
+        Some((
+            value,
+            data.map(|data| ArcInner {
+                pool: self.clone(),
+                data,
+            }),
+        ))
     }
 
     unsafe fn into_inner_and_next(self, data: ArcData<T>) -> Option<(T, Option<ArcInner<T>>)> {
@@ -56,26 +64,17 @@ impl<T> ArcPool<T> {
         if !is_unique {
             return None;
         }
-        self.pop_front_and_arc_next(&data)
-            .map(|(value, data)| (value, data.map(|data| ArcInner { pool: self, data })))
-    }
-
-    unsafe fn pop_front_and_arc_next(
-        &self,
-        unique_data: &ArcData<T>,
-    ) -> Option<(T, Option<ArcData<T>>)> {
         let guard = self.0.read();
+        data.refcount()
+            .compare_exchange(1, 0, atomic::Ordering::Acquire, atomic::Ordering::Relaxed)
+            .unwrap();
         let front_ptr = guard.front_entry().unwrap();
-        if !ptr::addr_eq(front_ptr, unique_data.ptr()) {
+        if !ptr::addr_eq(front_ptr, data.ptr()) {
             return None;
         }
         drop(guard);
-        unique_data
-            .refcount()
-            .compare_exchange(1, 0, atomic::Ordering::Acquire, atomic::Ordering::Relaxed)
-            .unwrap();
         let (value, data) = self.0.write().pop_front_and_arc_next();
-        Some((value, data))
+        Some((value, data.map(|data| ArcInner { pool: self, data })))
     }
 }
 
