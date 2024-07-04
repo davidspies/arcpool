@@ -113,9 +113,6 @@ impl<T> ArcPoolInner<T> {
                 break;
             }
             drop(self.pop_front_entry().unwrap());
-            if self.is_empty() {
-                break;
-            }
         }
     }
 
@@ -126,12 +123,6 @@ impl<T> ArcPoolInner<T> {
             self.0.pop_front();
         }
         Some(result)
-    }
-
-    fn is_empty(&self) -> bool {
-        let nqueues = self.0.len();
-        assert!(nqueues > 0);
-        nqueues == 1 && self.0.front().unwrap().is_empty()
     }
 }
 
