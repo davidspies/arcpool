@@ -65,9 +65,11 @@ impl<T> ArcPool<T> {
             return None;
         }
         let guard = self.0.read();
-        data.refcount()
-            .compare_exchange(1, 0, atomic::Ordering::Acquire, atomic::Ordering::Relaxed)
-            .unwrap();
+        let old_count = data.refcount().fetch_sub(1, atomic::Ordering::AcqRel);
+        // Can happen as a result of another thread calling `next`
+        if old_count > 1 {
+            return None;
+        }
         let front_ptr = guard.front_entry().unwrap();
         if !ptr::addr_eq(front_ptr, data.ptr()) {
             return None;

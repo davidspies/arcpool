@@ -9,3 +9,6 @@ derive-where = "*"
 parking_lot = "*"
 
 stable_queue = { path = "../stable_queue" }
+
+[dev-dependencies]
+bitvec = "*"

@@ -1,3 +1,8 @@
+use std::sync::{Barrier, Mutex};
+use std::thread;
+
+use bitvec::bitvec;
+
 use arc_queue_pool::{Arc, ArcPool};
 
 #[test]
@@ -143,4 +148,108 @@ fn test_complex_scenario() {
     let (value, next) = Arc::into_inner_and_next(arc4).unwrap();
     assert_eq!(value, 4);
     assert!(next.is_none());
+}
+
+#[test]
+fn test_arc_try_unwrap_and_next_with_next() {
+    let pool: ArcPool<i32> = ArcPool::new();
+    let arc1 = pool.alloc(1);
+    let arc2 = pool.alloc(2);
+    let arc3 = pool.alloc(3);
+
+    // Drop arc1 to allow unwrapping of arc2
+    drop(arc1);
+
+    // This should succeed and return Some for next
+    match Arc::try_unwrap_and_next(arc2) {
+        Ok((value, next)) => {
+            assert_eq!(value, 2);
+            assert!(next.is_some());
+            let next_arc = next.unwrap();
+            assert_eq!(*next_arc, 3);
+        }
+        Err(_) => panic!("Expected Ok, got Err"),
+    }
+
+    // arc3 should still be valid and the last in the queue
+    assert!(Arc::next(&arc3).is_none());
+}
+
+#[test]
+fn test_arc_into_inner_and_next_with_clone() {
+    let pool: ArcPool<i32> = ArcPool::new();
+    let arc1 = pool.alloc(1);
+    let arc2 = pool.alloc(2);
+    let arc3 = pool.alloc(3);
+
+    // Create a clone of arc2
+    let arc2_clone = arc2.clone();
+
+    // Drop arc1 to ensure it's not preventing arc2 from being unwrapped
+    drop(arc1);
+
+    // Attempt to unwrap arc2
+    let result = Arc::into_inner_and_next(arc2);
+
+    // This should return None because arc2_clone still exists
+    assert!(result.is_none());
+
+    // Verify that arc2_clone and arc3 are still valid
+    assert_eq!(*arc2_clone, 2);
+    assert_eq!(*arc3, 3);
+
+    // Verify that the next relationship is still intact
+    assert_eq!(*Arc::next(&arc2_clone).unwrap(), 3);
+}
+
+#[test]
+fn stress_test_arc_into_inner_and_next() {
+    const NUM_ARCS: usize = 100;
+    const NUM_THREADS: usize = 1000;
+
+    let pool: ArcPool<usize> = ArcPool::new();
+    let arcs: Vec<_> = (0..NUM_ARCS).map(|i| pool.alloc(i)).collect();
+
+    let barrier = std::sync::Arc::new(Barrier::new(NUM_THREADS + 1));
+    let visited = std::sync::Arc::new(Mutex::new(bitvec![0; NUM_ARCS]));
+
+    let threads: Vec<_> = (0..NUM_THREADS)
+        .map(|i| {
+            let mut current_arc = arcs[i % NUM_ARCS].clone();
+            let barrier = barrier.clone();
+            let visited = visited.clone();
+
+            thread::spawn(move || {
+                barrier.wait();
+
+                loop {
+                    match Arc::into_inner_and_next(current_arc) {
+                        Some((value, next)) => {
+                            let mut visited = visited.lock().unwrap();
+                            assert!(!visited[value]);
+                            visited.set(value, true);
+                            if let Some(next_arc) = next {
+                                current_arc = next_arc;
+                            } else {
+                                break;
+                            }
+                        }
+                        None => break,
+                    }
+                    thread::yield_now();
+                }
+            })
+        })
+        .collect();
+
+    drop(arcs);
+
+    barrier.wait();
+
+    for thread in threads {
+        thread.join().unwrap();
+    }
+
+    let final_visited = visited.lock().unwrap();
+    assert_eq!(final_visited.count_ones(), NUM_ARCS);
 }
