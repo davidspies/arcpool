@@ -2,19 +2,19 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc as StdArc;
 
 use arc_slice_pool::Arc;
-use breadcrumb_channel::{arc_channel, TryRecvError};
+use breadcrumb_channel::{arc::channel, TryRecvError};
 use tokio::time::{sleep, Duration};
 
 #[tokio::test]
 async fn test_arc_channel_creation() {
-    let (sender, mut receiver) = arc_channel::<i32>();
+    let (sender, mut receiver) = channel::<i32>();
     assert!(sender.send(42).is_ok());
     assert_eq!(receiver.recv().await.map(|arc| *arc), Some(42));
 }
 
 #[tokio::test]
 async fn test_multiple_receivers() {
-    let (sender, mut receiver1) = arc_channel::<String>();
+    let (sender, mut receiver1) = channel::<String>();
     let mut receiver2 = sender.subscribe();
 
     sender.send("Hello".to_string()).unwrap();
@@ -25,20 +25,20 @@ async fn test_multiple_receivers() {
 
 #[tokio::test]
 async fn test_try_recv_empty() {
-    let (_sender, mut receiver) = arc_channel::<i32>();
+    let (_sender, mut receiver) = channel::<i32>();
     assert_eq!(receiver.try_recv(), Err(TryRecvError::Empty));
 }
 
 #[tokio::test]
 async fn test_try_recv_disconnected() {
-    let (sender, mut receiver) = arc_channel::<i32>();
+    let (sender, mut receiver) = channel::<i32>();
     drop(sender);
     assert_eq!(receiver.try_recv(), Err(TryRecvError::Disconnected));
 }
 
 #[tokio::test]
 async fn test_sender_closed() {
-    let (sender, receiver) = arc_channel::<i32>();
+    let (sender, receiver) = channel::<i32>();
 
     tokio::spawn(async move {
         sleep(Duration::from_millis(100)).await;
@@ -50,7 +50,7 @@ async fn test_sender_closed() {
 
 #[tokio::test]
 async fn test_lazy_clone() {
-    let (sender, mut receiver1) = arc_channel::<Vec<i32>>();
+    let (sender, mut receiver1) = channel::<Vec<i32>>();
     let mut receiver2 = sender.subscribe();
 
     sender.send(vec![1, 2, 3]).unwrap();
@@ -63,14 +63,14 @@ async fn test_lazy_clone() {
 
 #[tokio::test]
 async fn test_send_after_receiver_dropped() {
-    let (sender, receiver) = arc_channel::<i32>();
+    let (sender, receiver) = channel::<i32>();
     drop(receiver);
     assert!(sender.send(42).is_err());
 }
 
 #[tokio::test]
 async fn test_multiple_sends() {
-    let (sender, mut receiver) = arc_channel::<i32>();
+    let (sender, mut receiver) = channel::<i32>();
 
     for i in 0..10 {
         sender.send(i).unwrap();
@@ -83,7 +83,7 @@ async fn test_multiple_sends() {
 
 #[tokio::test]
 async fn test_receiver_recv_after_sender_dropped() {
-    let (sender, mut receiver) = arc_channel::<i32>();
+    let (sender, mut receiver) = channel::<i32>();
     sender.send(42).unwrap();
     drop(sender);
 
@@ -93,7 +93,7 @@ async fn test_receiver_recv_after_sender_dropped() {
 
 #[tokio::test]
 async fn test_recv_await() {
-    let (sender, mut receiver) = arc_channel::<String>();
+    let (sender, mut receiver) = channel::<String>();
 
     let send_task = tokio::spawn(async move {
         sleep(Duration::from_millis(100)).await;
@@ -136,7 +136,7 @@ impl Drop for Trackable {
 #[tokio::test]
 async fn test_message_drop_on_lagging_receiver_removal() {
     let drop_counter = StdArc::new(AtomicUsize::new(0));
-    let (sender, receiver1) = arc_channel::<Trackable>();
+    let (sender, receiver1) = channel::<Trackable>();
     let mut receiver2 = sender.subscribe();
 
     // Send 10 messages
@@ -179,7 +179,7 @@ async fn test_message_drop_on_lagging_receiver_removal() {
 #[tokio::test]
 async fn test_last_receiver_dropped_after_sender_caught_up() {
     let drop_counter = StdArc::new(AtomicUsize::new(0));
-    let (sender, mut receiver) = arc_channel::<Trackable>();
+    let (sender, mut receiver) = channel::<Trackable>();
 
     // Send 5 messages
     for i in 0..5 {
@@ -212,7 +212,7 @@ async fn test_last_receiver_dropped_after_sender_caught_up() {
 #[tokio::test]
 async fn test_last_receiver_dropped_after_sender_not_caught_up() {
     let drop_counter = StdArc::new(AtomicUsize::new(0));
-    let (sender, mut receiver) = arc_channel::<Trackable>();
+    let (sender, mut receiver) = channel::<Trackable>();
 
     // Send 10 messages
     for i in 0..10 {
@@ -241,7 +241,7 @@ async fn test_last_receiver_dropped_after_sender_not_caught_up() {
 
 #[tokio::test]
 async fn test_try_recv_success() {
-    let (sender, mut receiver) = arc_channel::<i32>();
+    let (sender, mut receiver) = channel::<i32>();
 
     // Send a value
     sender.send(42).unwrap();
@@ -261,7 +261,7 @@ async fn test_try_recv_success() {
 
 #[tokio::test]
 async fn test_try_recv_with_lagging_receiver() {
-    let (sender, mut receiver1) = arc_channel::<i32>();
+    let (sender, mut receiver1) = channel::<i32>();
     let mut receiver2 = receiver1.clone();
 
     // Send a value
@@ -269,7 +269,6 @@ async fn test_try_recv_with_lagging_receiver() {
 
     // Use try_recv on receiver1
     assert_eq!(*receiver1.try_recv().unwrap(), 42);
-
 
     // Send another value
     sender.send(100).unwrap();
