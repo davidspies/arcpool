@@ -8,15 +8,13 @@ use std::{
     },
 };
 
-use consume_on_drop::{Consume, ConsumeOnDrop};
+use consume_on_drop::Consume;
 use parking_lot::Mutex;
 
-pub struct ArcIndex(usize, ConsumeOnDrop<Panicker>);
+pub struct ArcIndex(usize);
 
-struct Panicker;
-
-impl Consume for Panicker {
-    fn consume(self) {
+impl Drop for ArcIndex {
+    fn drop(&mut self) {
         panic!("ArcIndex dropped without from_index")
     }
 }
@@ -138,14 +136,13 @@ impl<T> ArcInner<T> {
 
     pub(super) fn into_index(this: Self) -> ArcIndex {
         unsafe { StdArc::increment_strong_count(StdArc::as_ptr(&this.pool)) }
-        ArcIndex(this.pool.offset + this.index, ConsumeOnDrop::new(Panicker))
+        ArcIndex(this.pool.offset + this.index)
     }
 
     pub(super) unsafe fn from_index(pool: StdArc<ArcPoolInner<T>>, index: ArcIndex) -> Self {
         let result = Self::reconstruct_from_ref(pool, &index);
         StdArc::decrement_strong_count(StdArc::as_ptr(&result.pool));
-        let ArcIndex(_, panicker) = index;
-        let _panicker = ConsumeOnDrop::into_inner(panicker);
+        mem::forget(index);
         result
     }
 
@@ -162,7 +159,7 @@ impl<T> ArcInner<T> {
 
     unsafe fn reconstruct_from_ref(
         mut pool: StdArc<ArcPoolInner<T>>,
-        &ArcIndex(index, _): &ArcIndex,
+        &ArcIndex(index): &ArcIndex,
     ) -> Self {
         let mut offset = pool.offset;
         while index < offset {
