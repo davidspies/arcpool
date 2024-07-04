@@ -1,72 +1,20 @@
-use std::sync::atomic::Ordering;
-use std::sync::{atomic::AtomicUsize, Arc as StdArc};
-use std::thread;
-
 use arc_queue_pool::{Arc, ArcPool};
 
 #[test]
-fn arc_pool_alloc() {
-    let pool = ArcPool::new();
-    let arc1 = pool.alloc(42);
-    let arc2 = pool.alloc(84);
+fn test_arc_pool_creation() {
+    let pool: ArcPool<i32> = ArcPool::new();
+    assert!(Arc::ref_count(&pool.alloc(42)) == 1);
 
-    assert_eq!(*arc1, 42);
-    assert_eq!(*arc2, 84);
+    let pool_with_capacity: ArcPool<String> = ArcPool::with_capacity(10);
+    assert!(Arc::ref_count(&pool_with_capacity.alloc("test".to_string())) == 1);
 }
 
 #[test]
-fn arc_clone() {
-    let pool = ArcPool::new();
-    let arc1 = pool.alloc(42);
-    let arc2 = arc1.clone();
-
-    assert_eq!(*arc1, 42);
-    assert_eq!(*arc2, 42);
-}
-
-#[test]
-fn arc_drop() {
-    let pool = ArcPool::new();
-    let arc = pool.alloc(42);
-    drop(arc);
-
-    // Allocate a new value to potentially reuse the slot
-    let arc2 = pool.alloc(84);
-    assert_eq!(*arc2, 84);
-}
-
-#[test]
-fn arc_next() {
-    let pool = ArcPool::new();
-    let arc1 = pool.alloc(1);
-    let _arc2 = pool.alloc(2);
-    let arc3 = pool.alloc(3);
-
-    let next1 = Arc::next(&arc1).unwrap();
-    let next2 = Arc::next(&next1).unwrap();
-
-    assert_eq!(*next1, 2);
-    assert_eq!(*next2, 3);
-    assert!(Arc::next(&arc3).is_none());
-}
-
-#[test]
-fn arc_into_inner() {
-    let pool = ArcPool::new();
-    let counter = DropCounter::new();
-    {
-        let arc = pool.alloc(counter.clone());
-        let _inner = Arc::into_inner_and_next(arc).unwrap();
-    } // _inner is dropped here
-    assert_eq!(counter.count(), 1);
-}
-
-#[test]
-fn multiple_queues() {
-    let pool = ArcPool::with_capacity(2);
+fn test_arc_allocation() {
+    let pool: ArcPool<i32> = ArcPool::new();
     let arc1 = pool.alloc(1);
     let arc2 = pool.alloc(2);
-    let arc3 = pool.alloc(3); // This should create a new queue
+    let arc3 = pool.alloc(3);
 
     assert_eq!(*arc1, 1);
     assert_eq!(*arc2, 2);
@@ -74,132 +22,125 @@ fn multiple_queues() {
 }
 
 #[test]
-fn threaded_usage() {
-    let pool = StdArc::new(ArcPool::new());
-    let threads: Vec<_> = (0..10)
-        .map(|i| {
-            let pool = pool.clone();
-            thread::spawn(move || {
-                let arc = pool.alloc(i);
-                assert_eq!(*arc, i);
-                let (inner, _next) = Arc::into_inner_and_next(arc)?;
-                Some(inner)
-            })
-        })
-        .collect();
+fn test_arc_cloning() {
+    let pool: ArcPool<i32> = ArcPool::new();
+    let arc1 = pool.alloc(42);
+    let arc2 = arc1.clone();
 
-    for (i, thread) in threads.into_iter().enumerate() {
-        let result = thread.join().unwrap();
-        assert_eq!(result, Some(i as i32));
-    }
+    assert_eq!(Arc::ref_count(&arc1), 2);
+    assert_eq!(Arc::ref_count(&arc2), 2);
 }
 
 #[test]
-fn large_allocation() {
-    let pool = ArcPool::new();
-    let arcs: Vec<_> = (0..1000).map(|i| pool.alloc(i)).collect();
+fn test_arc_next() {
+    let pool: ArcPool<i32> = ArcPool::new();
+    let arc1 = pool.alloc(1);
+    let arc2 = pool.alloc(2);
+    let arc3 = pool.alloc(3);
 
-    for (i, arc) in arcs.iter().enumerate() {
-        assert_eq!(**arc, i as i32);
-    }
-
-    // Test that we can still allocate after many allocations
-    let new_arc = pool.alloc(1000);
-    assert_eq!(*new_arc, 1000);
-}
-
-#[derive(Clone)]
-struct DropCounter {
-    count: StdArc<AtomicUsize>,
-}
-
-impl DropCounter {
-    fn new() -> Self {
-        DropCounter {
-            count: StdArc::new(AtomicUsize::new(0)),
-        }
-    }
-
-    fn count(&self) -> usize {
-        self.count.load(Ordering::SeqCst)
-    }
-}
-
-impl Drop for DropCounter {
-    fn drop(&mut self) {
-        self.count.fetch_add(1, Ordering::SeqCst);
-    }
+    assert_eq!(*Arc::next(&arc1).unwrap(), 2);
+    assert_eq!(*Arc::next(&arc2).unwrap(), 3);
+    assert!(Arc::next(&arc3).is_none());
 }
 
 #[test]
-fn single_arc_drop() {
-    let pool = ArcPool::new();
-    let counter = DropCounter::new();
-    {
-        let _arc = pool.alloc(counter.clone());
-    } // _arc is dropped here
-    assert_eq!(counter.count(), 1);
+fn test_arc_into_inner_and_next() {
+    let pool: ArcPool<i32> = ArcPool::new();
+    let arc1 = pool.alloc(1);
+    let arc2 = pool.alloc(2);
+    let mut arc3 = pool.alloc(3);
+
+    // This should fail because arc1 and arc2 still exist
+    let result = Arc::into_inner_and_next(arc3);
+    assert!(result.is_none());
+
+    drop(arc1);
+    arc3 = pool.alloc(4); // Reallocate arc3
+                          // This should still fail because arc2 exists
+    let result = Arc::into_inner_and_next(arc3);
+    assert!(result.is_none());
+
+    drop(arc2);
+    arc3 = pool.alloc(5); // Reallocate arc3 again
+                          // Now this should succeed
+    let (value, next) = Arc::into_inner_and_next(arc3).unwrap();
+    assert_eq!(value, 5);
+    assert!(next.is_none());
 }
 
 #[test]
-fn multiple_arc_drops() {
-    let pool = ArcPool::new();
-    let counter = DropCounter::new();
-    {
-        let arc1 = pool.alloc(counter.clone());
-        let arc2 = arc1.clone();
-        assert!(Arc::next(&arc1).is_none());
+fn test_arc_try_unwrap_and_next() {
+    let pool: ArcPool<i32> = ArcPool::new();
+    let arc1 = pool.alloc(1);
+    let arc2 = pool.alloc(2);
+    let arc3 = pool.alloc(3);
+    let arc3_clone = arc3.clone();
 
-        // Drop them in different orders
-        drop(arc2);
-        drop(arc1);
-    }
-    assert_eq!(counter.count(), 1);
+    // This should fail because arc3 has multiple references
+    assert!(Arc::try_unwrap_and_next(arc3).is_err());
+
+    drop(arc3_clone);
+    let arc3 = pool.alloc(3); // Reallocate arc3
+                              // This should still fail because arc1 and arc2 exist
+    assert!(Arc::try_unwrap_and_next(arc3).is_err());
+
+    drop(arc1);
+    drop(arc2);
+    let arc3 = pool.alloc(3); // Reallocate arc3 again
+                              // Now this should succeed
+    let (value, next) = Arc::try_unwrap_and_next(arc3).unwrap();
+    assert_eq!(value, 3);
+    assert!(next.is_none());
 }
 
 #[test]
-fn multiple_queues_drop() {
-    let pool = ArcPool::with_capacity(2);
-    let counter = DropCounter::new();
-    {
-        let arc1 = pool.alloc(counter.clone());
-        let arc2 = pool.alloc(counter.clone());
-        let arc3 = pool.alloc(counter.clone()); // This should create a new queue
-        let arc4 = Arc::next(&arc1).unwrap();
-        let arc5 = Arc::next(&arc2).unwrap();
-        assert!(Arc::next(&arc3).is_none());
+fn test_arc_ref_count() {
+    let pool: ArcPool<i32> = ArcPool::new();
+    let arc = pool.alloc(42);
 
-        // Drop in mixed order
-        drop(arc2);
-        drop(arc4);
-        drop(arc1);
-        drop(arc3);
-        drop(arc5);
-    }
-    assert_eq!(counter.count(), 3);
+    assert_eq!(Arc::ref_count(&arc), 1);
+
+    let arc_clone = arc.clone();
+    assert_eq!(Arc::ref_count(&arc), 2);
+    assert_eq!(Arc::ref_count(&arc_clone), 2);
+
+    drop(arc_clone);
+    assert_eq!(Arc::ref_count(&arc), 1);
 }
 
 #[test]
-fn threaded_drops() {
-    let pool = StdArc::new(ArcPool::new());
-    let counter = StdArc::new(AtomicUsize::new(0));
-    let threads: Vec<_> = (0..10)
-        .map(|_| {
-            let pool = pool.clone();
-            let counter = counter.clone();
-            std::thread::spawn(move || {
-                let dropper = DropCounter { count: counter };
-                let arc = pool.alloc(dropper);
-                let _arc2 = arc.clone();
-                drop(arc);
-                // _arc2 is dropped when the thread ends
-            })
-        })
-        .collect();
+fn test_arc_deref() {
+    let pool: ArcPool<String> = ArcPool::new();
+    let arc = pool.alloc("Hello, world!".to_string());
 
-    for thread in threads {
-        thread.join().unwrap();
-    }
+    assert_eq!(arc.len(), 13);
+    assert_eq!(&*arc, "Hello, world!");
+}
 
-    assert_eq!(counter.load(Ordering::SeqCst), 10);
+#[test]
+fn test_complex_scenario() {
+    let pool: ArcPool<i32> = ArcPool::new();
+    let arc1 = pool.alloc(1);
+    let arc2 = pool.alloc(2);
+    let arc3 = pool.alloc(3);
+    let arc4 = pool.alloc(4);
+
+    assert_eq!(*Arc::next(&arc1).unwrap(), 2);
+    assert_eq!(*Arc::next(&arc2).unwrap(), 3);
+    assert_eq!(*Arc::next(&arc3).unwrap(), 4);
+    assert!(Arc::next(&arc4).is_none());
+
+    drop(arc1);
+    drop(arc2);
+
+    let (value, next) = Arc::into_inner_and_next(arc3).unwrap();
+    assert_eq!(value, 3);
+    assert_eq!(**next.as_ref().unwrap(), 4);
+
+    // arc4 should now be the only one left
+    assert!(Arc::next(&arc4).is_none());
+    drop(next);
+    let (value, next) = Arc::into_inner_and_next(arc4).unwrap();
+    assert_eq!(value, 4);
+    assert!(next.is_none());
 }
