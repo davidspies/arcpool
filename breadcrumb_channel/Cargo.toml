@@ -13,4 +13,4 @@ arc_queue_pool = { path = "../arc_queue_pool" }
 arc_slice_pool = { path = "../arc_slice_pool" }
 
 [dev-dependencies]
-tokio = { version = "*", features = ["macros", "rt"] }
+tokio = { version = "*", features = ["macros", "rt", "time"] }
