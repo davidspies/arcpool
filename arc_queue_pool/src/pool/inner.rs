@@ -109,9 +109,10 @@ impl<T> ArcPoolInner<T> {
             let Some(Entry { refcount, value: _ }) = self.front_entry() else {
                 break;
             };
-            if refcount.load(atomic::Ordering::Acquire) > 0 {
+            if refcount.load(atomic::Ordering::Relaxed) > 0 {
                 break;
             }
+            atomic::fence(atomic::Ordering::Acquire);
             drop(self.pop_front_entry().unwrap());
         }
     }

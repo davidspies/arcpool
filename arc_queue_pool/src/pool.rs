@@ -40,6 +40,7 @@ impl<T> ArcPool<T> {
         if cur_count > 1 {
             return None;
         }
+        atomic::fence(atomic::Ordering::Acquire);
         let guard = self.0.read();
         let front_ptr = guard.front_entry().unwrap();
         if !ptr::addr_eq(front_ptr, data.ptr()) {
@@ -47,7 +48,7 @@ impl<T> ArcPool<T> {
         }
         drop(guard);
         data.refcount()
-            .compare_exchange(1, 0, atomic::Ordering::Acquire, atomic::Ordering::Relaxed)
+            .compare_exchange(1, 0, atomic::Ordering::Relaxed, atomic::Ordering::Relaxed)
             .unwrap();
         let (value, data) = self.0.write().pop_front_and_arc_next();
         Some((
@@ -65,11 +66,12 @@ impl<T> ArcPool<T> {
             return None;
         }
         let guard = self.0.read();
-        let old_count = data.refcount().fetch_sub(1, atomic::Ordering::AcqRel);
+        let old_count = data.refcount().fetch_sub(1, atomic::Ordering::Release);
         // Can happen as a result of another thread calling `next`
         if old_count > 1 {
             return None;
         }
+        atomic::fence(atomic::Ordering::Acquire);
         let front_ptr = guard.front_entry().unwrap();
         if !ptr::addr_eq(front_ptr, data.ptr()) {
             return None;
@@ -144,6 +146,7 @@ impl<T> Consume for ArcInner<T> {
         if old_count > 1 {
             return;
         }
+        atomic::fence(atomic::Ordering::Acquire);
         let guard = self.pool.0.read();
         let front_ptr = guard.front_entry();
         if !front_ptr.is_some_and(|ptr| ptr::addr_eq(ptr, self.data.ptr())) {
