@@ -4,13 +4,13 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-consume_on_drop = "*"
-derive-where = "*"
-parking_lot = "*"
-tokio = { version = "*", features = ["sync"] }
+consume_on_drop.workspace = true
+derive-where.workspace = true
+parking_lot.workspace = true
+tokio = { workspace = true, features = ["sync"] }
 
 arc_queue_pool = { path = "../arc_queue_pool" }
 arc_slice_pool = { path = "../arc_slice_pool" }
 
 [dev-dependencies]
-tokio = { version = "*", features = ["macros", "rt", "time"] }
+tokio = { workspace = true, features = ["macros", "rt", "time"] }

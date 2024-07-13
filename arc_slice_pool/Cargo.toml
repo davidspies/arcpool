@@ -4,6 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-consume_on_drop = "*"
-derive-where = "*"
-parking_lot = "*"
+consume_on_drop.workspace = true
+derive-where.workspace = true
+parking_lot.workspace = true
