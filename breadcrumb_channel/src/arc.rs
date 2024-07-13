@@ -3,10 +3,10 @@ use derive_where::derive_where;
 
 use crate::TryRecvError;
 
-pub struct Sender<T>(crate::Sender<ArcIndex, std::sync::Arc<ArcPool<T>>>);
+pub struct Sender<T>(crate::Sender<ArcIndex<T>, std::sync::Arc<ArcPool<T>>>);
 
 #[derive_where(Clone)]
-pub struct Receiver<T>(crate::Receiver<ArcIndex, std::sync::Arc<ArcPool<T>>>);
+pub struct Receiver<T>(crate::Receiver<ArcIndex<T>, std::sync::Arc<ArcPool<T>>>);
 
 pub fn channel<T>() -> (Sender<T>, Receiver<T>) {
     let arc_pool = std::sync::Arc::new(ArcPool::new());

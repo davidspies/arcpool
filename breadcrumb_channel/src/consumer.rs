@@ -52,11 +52,11 @@ impl<T: Clone> Consumer<T> for DropNormally {
     fn consume(&self, _: T) {}
 }
 
-impl<T> UnsafeConsumer<ArcIndex> for ArcPool<T> {
-    unsafe fn clone_value(&self, value: &ArcIndex) -> ArcIndex {
+impl<T> UnsafeConsumer<ArcIndex<T>> for ArcPool<T> {
+    unsafe fn clone_value(&self, value: &ArcIndex<T>) -> ArcIndex<T> {
         Arc::into_index(Arc::clone_from_index(self, value))
     }
-    unsafe fn consume(&self, value: ArcIndex) {
+    unsafe fn consume(&self, value: ArcIndex<T>) {
         drop(Arc::from_index(self, value))
     }
 }

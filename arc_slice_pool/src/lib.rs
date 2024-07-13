@@ -2,7 +2,6 @@ use std::{
     cmp::Ordering,
     fmt::{self, Debug, Formatter},
     hash::{Hash, Hasher},
-    marker::PhantomData,
     ops::Deref,
 };
 
@@ -41,12 +40,7 @@ impl<T> ArcPool<T> {
     pub fn alloc(&self, mut value: T) -> Arc<T> {
         let read_guard = self.0.read();
         value = match read_guard.try_alloc(value) {
-            Ok(arc_inner) => {
-                return Arc {
-                    inner: ConsumeOnDrop::new(arc_inner),
-                    _phantom: PhantomData,
-                }
-            }
+            Ok(arc_inner) => return Arc(ConsumeOnDrop::new(arc_inner)),
             Err(value) => value,
         };
         drop(read_guard);
@@ -59,61 +53,49 @@ impl<T> ArcPool<T> {
         read_guard.set_next(inner.clone());
         let arc_inner = inner.try_alloc(value).unwrap_or_else(|_| unreachable!());
         *RwLockUpgradableReadGuard::upgrade(read_guard) = inner;
-        Arc {
-            inner: ConsumeOnDrop::new(arc_inner),
-            _phantom: PhantomData,
-        }
+        Arc(ConsumeOnDrop::new(arc_inner))
     }
 }
 
 #[derive_where(Clone)]
-pub struct Arc<T> {
-    inner: ConsumeOnDrop<ArcInner<T>>,
-    _phantom: PhantomData<*const T>, // Arc<T> should not be `Send` unless T is `Send` and `Sync`
-}
-
-unsafe impl<T: Send + Sync> Send for Arc<T> {}
-unsafe impl<T: Send + Sync> Sync for Arc<T> {}
+pub struct Arc<T>(ConsumeOnDrop<ArcInner<T>>);
 
 impl<T> Arc<T> {
-    pub fn into_inner(Self { inner, _phantom }: Self) -> Option<T> {
+    pub fn into_inner(Self(inner): Self) -> Option<T> {
         ConsumeOnDrop::into_inner(inner).into_inner()
     }
 
-    pub fn try_unwrap(Self { inner, _phantom }: Self) -> Result<T, Self> {
+    pub fn try_unwrap(Self(inner): Self) -> Result<T, Self> {
         match ConsumeOnDrop::into_inner(inner).try_unwrap() {
             Ok(value) => Ok(value),
-            Err(inner) => Err(Self {
-                inner: ConsumeOnDrop::new(inner),
-                _phantom,
-            }),
+            Err(inner) => Err(Self(ConsumeOnDrop::new(inner))),
         }
     }
 
-    pub fn into_index(self) -> ArcIndex {
-        ArcInner::into_index(ConsumeOnDrop::into_inner(self.inner))
+    pub fn into_index(self) -> ArcIndex<T> {
+        ArcInner::into_index(ConsumeOnDrop::into_inner(self.0))
     }
 
     pub fn ptr_eq(this: &Self, other: &Self) -> bool {
-        ArcInner::ptr_eq(&this.inner, &other.inner)
+        ArcInner::ptr_eq(&this.0, &other.0)
     }
 
     /// # Safety
     /// Must be the same pool as the one that created the Arc
-    pub unsafe fn from_index(pool: &ArcPool<T>, index: ArcIndex) -> Self {
-        Self {
-            inner: ConsumeOnDrop::new(ArcInner::from_index(pool.0.read().clone(), index)),
-            _phantom: PhantomData,
-        }
+    pub unsafe fn from_index(pool: &ArcPool<T>, index: ArcIndex<T>) -> Self {
+        Self(ConsumeOnDrop::new(ArcInner::from_index(
+            pool.0.read().clone(),
+            index,
+        )))
     }
 
     /// # Safety
     /// Must be the same pool as the one that created the Arc
-    pub unsafe fn clone_from_index(pool: &ArcPool<T>, index: &ArcIndex) -> Self {
-        Self {
-            inner: ConsumeOnDrop::new(ArcInner::clone_from_index(pool.0.read().clone(), index)),
-            _phantom: PhantomData,
-        }
+    pub unsafe fn clone_from_index(pool: &ArcPool<T>, index: &ArcIndex<T>) -> Self {
+        Self(ConsumeOnDrop::new(ArcInner::clone_from_index(
+            pool.0.read().clone(),
+            index,
+        )))
     }
 }
 
@@ -121,7 +103,7 @@ impl<T> Deref for Arc<T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
-        &self.inner
+        &self.0
     }
 }
 

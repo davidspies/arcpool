@@ -1,5 +1,6 @@
 use std::{
     cell::UnsafeCell,
+    marker::PhantomData,
     mem::{self, MaybeUninit},
     ops::Deref,
     sync::{
@@ -11,9 +12,15 @@ use std::{
 use consume_on_drop::Consume;
 use parking_lot::Mutex;
 
-pub struct ArcIndex(usize);
+pub struct ArcIndex<T> {
+    index: usize,
+    phantom: PhantomData<*const T>,
+}
 
-impl Drop for ArcIndex {
+unsafe impl<T: Send + Sync> Send for ArcIndex<T> {}
+unsafe impl<T: Send + Sync> Sync for ArcIndex<T> {}
+
+impl<T> Drop for ArcIndex<T> {
     fn drop(&mut self) {
         panic!("ArcIndex dropped without from_index")
     }
@@ -53,6 +60,7 @@ impl<T> ArcPoolInner<T> {
         Ok(ArcInner {
             pool: self.clone(),
             index,
+            phantom: PhantomData,
         })
     }
 
@@ -74,7 +82,11 @@ impl<T> ArcPoolInner<T> {
 pub(super) struct ArcInner<T> {
     pool: StdArc<ArcPoolInner<T>>,
     index: usize,
+    phantom: PhantomData<*const T>,
 }
+
+unsafe impl<T: Send + Sync> Send for ArcInner<T> {}
+unsafe impl<T: Send + Sync> Sync for ArcInner<T> {}
 
 impl<T> Clone for ArcInner<T> {
     fn clone(&self) -> Self {
@@ -83,6 +95,7 @@ impl<T> Clone for ArcInner<T> {
         Self {
             pool: self.pool.clone(),
             index: self.index,
+            phantom: PhantomData,
         }
     }
 }
@@ -134,19 +147,25 @@ impl<T> ArcInner<T> {
         Ok(unsafe { result.assume_init() })
     }
 
-    pub(super) fn into_index(this: Self) -> ArcIndex {
+    pub(super) fn into_index(this: Self) -> ArcIndex<T> {
         unsafe { StdArc::increment_strong_count(StdArc::as_ptr(&this.pool)) }
-        ArcIndex(this.pool.offset + this.index)
+        ArcIndex {
+            index: this.pool.offset + this.index,
+            phantom: PhantomData,
+        }
     }
 
-    pub(super) unsafe fn from_index(pool: StdArc<ArcPoolInner<T>>, index: ArcIndex) -> Self {
+    pub(super) unsafe fn from_index(pool: StdArc<ArcPoolInner<T>>, index: ArcIndex<T>) -> Self {
         let result = Self::reconstruct_from_ref(pool, &index);
         StdArc::decrement_strong_count(StdArc::as_ptr(&result.pool));
         mem::forget(index);
         result
     }
 
-    pub(super) unsafe fn clone_from_index(pool: StdArc<ArcPoolInner<T>>, index: &ArcIndex) -> Self {
+    pub(super) unsafe fn clone_from_index(
+        pool: StdArc<ArcPoolInner<T>>,
+        index: &ArcIndex<T>,
+    ) -> Self {
         let result = Self::reconstruct_from_ref(pool, index);
         let (ref_count, _) = &result.pool.mem[result.index];
         ref_count.fetch_add(1, atomic::Ordering::Relaxed);
@@ -159,7 +178,7 @@ impl<T> ArcInner<T> {
 
     unsafe fn reconstruct_from_ref(
         mut pool: StdArc<ArcPoolInner<T>>,
-        &ArcIndex(index): &ArcIndex,
+        &ArcIndex { index, phantom: _ }: &ArcIndex<T>,
     ) -> Self {
         let mut offset = pool.offset;
         while index < offset {
@@ -169,6 +188,7 @@ impl<T> ArcInner<T> {
         Self {
             index: index - offset,
             pool,
+            phantom: PhantomData,
         }
     }
 }

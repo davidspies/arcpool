@@ -51,9 +51,6 @@ impl<T> Deref for Arc<T> {
     }
 }
 
-unsafe impl<T: Send + Sync> Send for Arc<T> {}
-unsafe impl<T: Send + Sync> Sync for Arc<T> {}
-
 impl<T: Debug> Debug for Arc<T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         (**self).fmt(f)

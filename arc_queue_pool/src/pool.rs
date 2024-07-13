@@ -87,6 +87,9 @@ pub(super) struct ArcInner<T> {
     data: ArcData<T>,
 }
 
+unsafe impl<T: Send + Sync> Send for ArcInner<T> {}
+unsafe impl<T: Send + Sync> Sync for ArcInner<T> {}
+
 impl<T> ArcInner<T> {
     pub(super) fn next(&self) -> Option<Self> {
         let read_guard = self.pool.0.read();
