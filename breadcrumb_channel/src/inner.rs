@@ -7,7 +7,7 @@ use tokio::sync::watch;
 use crate::consumer::UnsafeConsumer;
 
 #[derive_where(Clone; C)]
-pub(crate) struct ReceiverInner<T, C: UnsafeConsumer<T>> {
+pub(super) struct ReceiverInner<T, C: UnsafeConsumer<T>> {
     next_node: arc_slice_pool::Arc<OnceLock<arc_queue_pool::Arc<T>>>,
     consumer: C,
     notify_pool: std::sync::Arc<arc_slice_pool::ArcPool<OnceLock<arc_queue_pool::Arc<T>>>>,
@@ -33,7 +33,7 @@ impl<T, C: UnsafeConsumer<T>> Consume for ReceiverInner<T, C> {
 }
 
 impl<T, C: UnsafeConsumer<T>> ReceiverInner<T, C> {
-    pub(crate) fn new(
+    pub(super) fn new(
         next_node: arc_slice_pool::Arc<OnceLock<arc_queue_pool::Arc<T>>>,
         consumer: C,
         notify_pool: std::sync::Arc<arc_slice_pool::ArcPool<OnceLock<arc_queue_pool::Arc<T>>>>,
@@ -45,7 +45,7 @@ impl<T, C: UnsafeConsumer<T>> ReceiverInner<T, C> {
         }
     }
 
-    pub(crate) fn try_next(
+    pub(super) fn try_next(
         &mut self,
         next_node_rx: &watch::Receiver<arc_slice_pool::Arc<OnceLock<arc_queue_pool::Arc<T>>>>,
     ) -> Option<T> {
@@ -83,14 +83,14 @@ impl<T, C: UnsafeConsumer<T>> ReceiverInner<T, C> {
         }
     }
 
-    pub(crate) fn consumer(&self) -> &C {
+    pub(super) fn consumer(&self) -> &C {
         &self.consumer
     }
 }
 
 /// # Safety
 /// Instance of T must be valid for the consumer
-pub(crate) unsafe fn consume_node<T>(
+pub(super) unsafe fn consume_node<T>(
     consumer: &impl UnsafeConsumer<T>,
     node: arc_slice_pool::Arc<OnceLock<arc_queue_pool::Arc<T>>>,
 ) {

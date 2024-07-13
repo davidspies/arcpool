@@ -28,7 +28,7 @@ impl<T> ArcPool<T> {
         Self(StdArc::new(RwLock::new(ArcPoolInner::with_capacity(cap))))
     }
 
-    pub(crate) fn alloc_inner(&self, value: T) -> ArcInner<T> {
+    pub(super) fn alloc_inner(&self, value: T) -> ArcInner<T> {
         ArcInner {
             pool: self.clone(),
             data: self.0.write().alloc_data(value),
@@ -82,13 +82,13 @@ impl<T> ArcPool<T> {
     }
 }
 
-pub(crate) struct ArcInner<T> {
+pub(super) struct ArcInner<T> {
     pool: ArcPool<T>,
     data: ArcData<T>,
 }
 
 impl<T> ArcInner<T> {
-    pub(crate) fn next(&self) -> Option<Self> {
+    pub(super) fn next(&self) -> Option<Self> {
         let read_guard = self.pool.0.read();
         Some(ArcInner {
             pool: self.pool.clone(),
@@ -96,19 +96,19 @@ impl<T> ArcInner<T> {
         })
     }
 
-    pub(crate) fn into_inner_and_next(self) -> Option<(T, Option<ArcInner<T>>)> {
+    pub(super) fn into_inner_and_next(self) -> Option<(T, Option<ArcInner<T>>)> {
         unsafe { self.pool.into_inner_and_next(self.data) }
     }
 
-    pub(crate) fn try_unwrap_and_next(self) -> Result<(T, Option<ArcInner<T>>), ArcInner<T>> {
+    pub(super) fn try_unwrap_and_next(self) -> Result<(T, Option<ArcInner<T>>), ArcInner<T>> {
         unsafe { self.pool.try_unwrap_and_next(&self.data).ok_or(self) }
     }
 
-    pub(crate) fn get(&self) -> &T {
+    pub(super) fn get(&self) -> &T {
         &unsafe { &*self.data.ptr() }.value
     }
 
-    pub(crate) fn ref_count(&self) -> usize {
+    pub(super) fn ref_count(&self) -> usize {
         unsafe { self.data.refcount() }.load(atomic::Ordering::Relaxed)
     }
 }
