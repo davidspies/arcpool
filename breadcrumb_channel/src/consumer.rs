@@ -5,6 +5,7 @@ use arc_slice_pool::{Arc, ArcIndex, ArcPool};
 #[derive(Clone, Copy)]
 pub struct DropNormally;
 
+/// A [Consumer] holds metadata needed to clone and consume values of type [T].
 pub trait Consumer<T> {
     fn clone_value(&self, value: &T) -> T;
     fn consume(&self, value: T);
@@ -19,6 +20,15 @@ impl<C: Consumer<T>, T> Consumer<T> for StdArc<C> {
     }
 }
 
+/// An [UnsafeConsumer] is like a [Consumer], but it has some notion of "valid" values which it
+/// can clone and consume. Unlike with [Consumer], The validity of a value is not reflected in the
+/// type system.
+///
+/// If a value is not valid, the behavior of [UnsafeConsumer::clone_value] and
+/// [UnsafeConsumer::consume] is undefined.
+///
+/// If a value _is_ valid, [UnsafeConsumer::clone_value] should return another valid value for
+/// this consumer.
 pub trait UnsafeConsumer<T> {
     #[allow(clippy::missing_safety_doc)]
     unsafe fn clone_value(&self, value: &T) -> T;
@@ -35,6 +45,8 @@ impl<C: UnsafeConsumer<T>, T> UnsafeConsumer<T> for StdArc<C> {
     }
 }
 
+/// A newtype wrapper which makes it possible to use a safe [Consumer] anywhere an [UnsafeConsumer]
+/// is expected.
 #[derive(Clone, Copy)]
 pub struct Safe<C>(pub C);
 

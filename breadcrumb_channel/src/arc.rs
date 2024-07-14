@@ -10,6 +10,8 @@ pub struct Sender<T>(crate::Sender<ArcIndex<T>, StdArc<ArcPool<T>>>);
 #[derive_where(Clone)]
 pub struct Receiver<T>(crate::Receiver<ArcIndex<T>, StdArc<ArcPool<T>>>);
 
+/// Creates a breadcrumb channel of [Arc]<T>s. Stored as [ArcIndex] under the hood
+/// to optimize the memory usage when [Receiver]s lag behind.
 pub fn channel<T>() -> (Sender<T>, Receiver<T>) {
     let arc_pool = StdArc::new(ArcPool::new());
     let (sender, receiver) = crate::channel_with_consumer(arc_pool);

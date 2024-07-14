@@ -34,7 +34,7 @@ impl<T, C: Consumer<T>> Sender<T, Safe<C>> {
 
 impl<T, C: UnsafeConsumer<T>> Sender<T, C> {
     /// # Safety
-    /// The value must be a valid value for the consumer
+    /// The value must be a valid value for the consumer the channel was created with.
     pub unsafe fn unsafe_send(&self, value: T) -> Result<(), T> {
         if self.next_node_tx.is_closed() {
             return Err(value);
