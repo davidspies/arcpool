@@ -22,15 +22,25 @@ impl<T> ArcPool<T> {
 }
 
 impl<T> Arc<T> {
+    /// Returns the next Arc created after this one, if it exists.
     pub fn next(this: &Self) -> Option<Self> {
         this.0.next().map(|inner| Self(ConsumeOnDrop::new(inner)))
     }
 
+    /// If the refcount is 1 and all prior Arcs have been dropped, consumes the Arc
+    /// returning its value along with the next Arc created after this one, if it exists.
+    /// 
+    /// If this method is called concurrently on every clone of the earliest Arc in the pool,
+    /// it is guaranteed that exactly one of them will return `Some(_)`. Furthermore, no other
+    /// Arc will be silently dropped.
     pub fn into_inner_and_next(this: Self) -> Option<(T, Option<Self>)> {
         let (value, next) = ConsumeOnDrop::into_inner(this.0).into_inner_and_next()?;
         Some((value, next.map(|inner| Self(ConsumeOnDrop::new(inner)))))
     }
 
+    /// If the refcount is 1 and all prior Arcs have been dropped, consumes the Arc
+    /// returning its value along with the next Arc created after this one, if it exists.
+    /// On failure, returns the argument.
     pub fn try_unwrap_and_next(this: Self) -> Result<(T, Option<Self>), Self> {
         match ConsumeOnDrop::into_inner(this.0).try_unwrap_and_next() {
             Ok((value, next)) => Ok((value, next.map(|inner| Self(ConsumeOnDrop::new(inner))))),

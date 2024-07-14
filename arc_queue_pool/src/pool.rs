@@ -10,6 +10,10 @@ use self::inner::{ArcData, ArcPoolInner};
 
 mod inner;
 
+/// Maintains a queue of backing memory for [Arc](crate::Arc)s.
+///
+/// No Arc in the queue will be dropped until all references to it are dropped and also all Arcs
+/// created before it are dropped.
 #[derive_where(Clone)]
 pub struct ArcPool<T>(StdArc<RwLock<ArcPoolInner<T>>>);
 

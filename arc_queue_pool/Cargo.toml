@@ -2,6 +2,9 @@
 name = "arc_queue_pool"
 version = "0.1.0"
 edition = "2021"
+description = "A pool of Arcs that are dropped in the same order they were created"
+license = "MIT"
+repository = "https://github.com/davidspies/arcpool"
 
 [dependencies]
 consume_on_drop.workspace = true
