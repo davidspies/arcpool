@@ -2,6 +2,9 @@
 name = "arc_slice_pool"
 version = "0.1.0"
 edition = "2021"
+description = "Arcs backed by chunks of contiguous memory"
+license = "MIT"
+repository = "https://github.com/davidspies/arcpool"
 
 [dependencies]
 consume_on_drop.workspace = true
