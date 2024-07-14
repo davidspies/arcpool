@@ -8,7 +8,7 @@ use std::{
 
 use consume_on_drop::ConsumeOnDrop;
 use derive_where::derive_where;
-use parking_lot::{RwLock, RwLockUpgradableReadGuard, RwLockWriteGuard};
+use parking_lot::{RwLock, RwLockUpgradableReadGuard};
 
 use self::inner::{ArcInner, ArcPoolInner};
 
@@ -42,15 +42,7 @@ impl<T> ArcPool<T> {
     }
 
     pub fn alloc(&self, mut value: T) -> Arc<T> {
-        let mut read_guard = self.0.read();
-        if read_guard.capacity() == 0 {
-            drop(read_guard);
-            let mut write_guard = self.0.write();
-            if write_guard.capacity() == 0 {
-                *write_guard = StdArc::new(ArcPoolInner::with_capacity(1, 0, Weak::new()));
-            }
-            read_guard = RwLockWriteGuard::downgrade(write_guard);
-        }
+        let read_guard = self.0.read();
         value = match read_guard.try_alloc(value) {
             Ok(arc_inner) => return Arc(ConsumeOnDrop::new(arc_inner)),
             Err(value) => value,
@@ -58,7 +50,7 @@ impl<T> ArcPool<T> {
         drop(read_guard);
         let read_guard = self.0.upgradable_read();
         let inner = StdArc::new(ArcPoolInner::with_capacity(
-            read_guard.capacity() * 2,
+            (read_guard.capacity() * 2).max(1),
             read_guard.offset() + read_guard.capacity(),
             StdArc::downgrade(&read_guard),
         ));
