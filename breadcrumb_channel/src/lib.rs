@@ -1,8 +1,10 @@
 use std::{
     mem::{self, MaybeUninit},
-    sync::OnceLock,
+    sync::{Arc as StdArc, OnceLock},
 };
 
+use arc_queue_pool::{Arc as QueueArc, ArcPool as ArcQueuePool};
+use arc_slice_pool::{Arc as SliceArc, ArcPool as ArcSlicePool};
 use consume_on_drop::ConsumeOnDrop;
 use derive_where::derive_where;
 use tokio::sync::watch;
@@ -18,10 +20,10 @@ pub mod arc;
 pub mod consumer;
 
 pub struct Sender<T, C: UnsafeConsumer<T> = Safe<DropNormally>> {
-    next_node_tx: watch::Sender<arc_slice_pool::Arc<OnceLock<arc_queue_pool::Arc<T>>>>,
+    next_node_tx: watch::Sender<SliceArc<OnceLock<QueueArc<T>>>>,
     consumer: C,
-    node_pool: arc_queue_pool::ArcPool<T>,
-    notify_pool: std::sync::Arc<arc_slice_pool::ArcPool<OnceLock<arc_queue_pool::Arc<T>>>>,
+    node_pool: ArcQueuePool<T>,
+    notify_pool: StdArc<ArcSlicePool<OnceLock<QueueArc<T>>>>,
 }
 
 impl<T, C: Consumer<T>> Sender<T, Safe<C>> {
@@ -75,7 +77,7 @@ impl<T, C: UnsafeConsumer<T>> Sender<T, C> {
 #[derive_where(Clone; C)]
 pub struct Receiver<T, C: UnsafeConsumer<T> = Safe<DropNormally>> {
     inner: ConsumeOnDrop<ReceiverInner<T, C>>,
-    next_node_rx: watch::Receiver<arc_slice_pool::Arc<OnceLock<arc_queue_pool::Arc<T>>>>,
+    next_node_rx: watch::Receiver<SliceArc<OnceLock<QueueArc<T>>>>,
 }
 
 impl<T, C: UnsafeConsumer<T>> Receiver<T, C> {
@@ -120,8 +122,8 @@ pub fn channel<T: Clone>() -> (Sender<T>, Receiver<T>) {
 pub fn channel_with_consumer<T, C: UnsafeConsumer<T> + Clone>(
     consumer: C,
 ) -> (Sender<T, C>, Receiver<T, C>) {
-    let node_pool = arc_queue_pool::ArcPool::new();
-    let notify_pool = std::sync::Arc::new(arc_slice_pool::ArcPool::new());
+    let node_pool = ArcQueuePool::new();
+    let notify_pool = StdArc::new(ArcSlicePool::new());
     let next_node = notify_pool.alloc(OnceLock::new());
     let (next_node_tx, next_node_rx) = watch::channel(next_node.clone());
     let sender = Sender {

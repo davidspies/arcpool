@@ -1,4 +1,4 @@
-use std::sync::{Barrier, Mutex};
+use std::sync::{Arc as StdArc, Barrier, Mutex};
 use std::thread;
 
 use bitvec::bitvec;
@@ -210,8 +210,8 @@ fn stress_test_arc_into_inner_and_next() {
     let pool: ArcPool<usize> = ArcPool::new();
     let arcs: Vec<_> = (0..NUM_ARCS).map(|i| pool.alloc(i)).collect();
 
-    let barrier = std::sync::Arc::new(Barrier::new(NUM_THREADS + 1));
-    let visited = std::sync::Arc::new(Mutex::new(bitvec![0; NUM_ARCS]));
+    let barrier = StdArc::new(Barrier::new(NUM_THREADS + 1));
+    let visited = StdArc::new(Mutex::new(bitvec![0; NUM_ARCS]));
 
     let threads: Vec<_> = (0..NUM_THREADS)
         .map(|i| {

@@ -36,7 +36,6 @@ pub(super) struct ArcPoolInner<T> {
 
 impl<T> ArcPoolInner<T> {
     pub(super) fn with_capacity(cap: usize, offset: usize, prev: Weak<ArcPoolInner<T>>) -> Self {
-        let cap = cap.max(1);
         Self {
             free_list: Mutex::new((0..cap).rev().collect()),
             mem: (0..cap)

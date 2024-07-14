@@ -1,3 +1,5 @@
+use std::sync::Arc as StdArc;
+
 use arc_slice_pool::{Arc, ArcIndex, ArcPool};
 
 #[derive(Clone, Copy)]
@@ -8,7 +10,7 @@ pub trait Consumer<T> {
     fn consume(&self, value: T);
 }
 
-impl<C: Consumer<T>, T> Consumer<T> for std::sync::Arc<C> {
+impl<C: Consumer<T>, T> Consumer<T> for StdArc<C> {
     fn clone_value(&self, value: &T) -> T {
         (**self).clone_value(value)
     }
@@ -24,7 +26,7 @@ pub trait UnsafeConsumer<T> {
     unsafe fn consume(&self, value: T);
 }
 
-impl<C: UnsafeConsumer<T>, T> UnsafeConsumer<T> for std::sync::Arc<C> {
+impl<C: UnsafeConsumer<T>, T> UnsafeConsumer<T> for StdArc<C> {
     unsafe fn clone_value(&self, value: &T) -> T {
         (**self).clone_value(value)
     }

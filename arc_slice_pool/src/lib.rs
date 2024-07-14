@@ -3,11 +3,12 @@ use std::{
     fmt::{self, Debug, Formatter},
     hash::{Hash, Hasher},
     ops::Deref,
+    sync::{Arc as StdArc, Weak},
 };
 
 use consume_on_drop::ConsumeOnDrop;
 use derive_where::derive_where;
-use parking_lot::{RwLock, RwLockUpgradableReadGuard};
+use parking_lot::{RwLock, RwLockUpgradableReadGuard, RwLockWriteGuard};
 
 use self::inner::{ArcInner, ArcPoolInner};
 
@@ -15,7 +16,8 @@ pub use self::inner::ArcIndex;
 
 mod inner;
 
-pub struct ArcPool<T>(RwLock<std::sync::Arc<ArcPoolInner<T>>>);
+/// Stores `Arc` backing data in contiguous memory.
+pub struct ArcPool<T>(RwLock<StdArc<ArcPoolInner<T>>>);
 
 unsafe impl<T: Send + Sync> Send for ArcPool<T> {}
 unsafe impl<T: Send + Sync> Sync for ArcPool<T> {}
@@ -28,27 +30,37 @@ impl<T> Default for ArcPool<T> {
 
 impl<T> ArcPool<T> {
     pub fn new() -> Self {
-        Self::with_capacity(8)
+        Self::with_capacity(0)
     }
 
     pub fn with_capacity(cap: usize) -> Self {
-        Self(RwLock::new(std::sync::Arc::new(
-            ArcPoolInner::with_capacity(cap, 0, std::sync::Weak::new()),
-        )))
+        Self(RwLock::new(StdArc::new(ArcPoolInner::with_capacity(
+            cap,
+            0,
+            Weak::new(),
+        ))))
     }
 
     pub fn alloc(&self, mut value: T) -> Arc<T> {
-        let read_guard = self.0.read();
+        let mut read_guard = self.0.read();
+        if read_guard.capacity() == 0 {
+            drop(read_guard);
+            let mut write_guard = self.0.write();
+            if write_guard.capacity() == 0 {
+                *write_guard = StdArc::new(ArcPoolInner::with_capacity(1, 0, Weak::new()));
+            }
+            read_guard = RwLockWriteGuard::downgrade(write_guard);
+        }
         value = match read_guard.try_alloc(value) {
             Ok(arc_inner) => return Arc(ConsumeOnDrop::new(arc_inner)),
             Err(value) => value,
         };
         drop(read_guard);
         let read_guard = self.0.upgradable_read();
-        let inner = std::sync::Arc::new(ArcPoolInner::with_capacity(
+        let inner = StdArc::new(ArcPoolInner::with_capacity(
             read_guard.capacity() * 2,
             read_guard.offset() + read_guard.capacity(),
-            std::sync::Arc::downgrade(&read_guard),
+            StdArc::downgrade(&read_guard),
         ));
         read_guard.set_next(inner.clone());
         let arc_inner = inner.try_alloc(value).unwrap_or_else(|_| unreachable!());

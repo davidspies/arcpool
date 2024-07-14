@@ -1,15 +1,17 @@
+use std::sync::Arc as StdArc;
+
 use arc_slice_pool::{Arc, ArcIndex, ArcPool};
 use derive_where::derive_where;
 
 use crate::TryRecvError;
 
-pub struct Sender<T>(crate::Sender<ArcIndex<T>, std::sync::Arc<ArcPool<T>>>);
+pub struct Sender<T>(crate::Sender<ArcIndex<T>, StdArc<ArcPool<T>>>);
 
 #[derive_where(Clone)]
-pub struct Receiver<T>(crate::Receiver<ArcIndex<T>, std::sync::Arc<ArcPool<T>>>);
+pub struct Receiver<T>(crate::Receiver<ArcIndex<T>, StdArc<ArcPool<T>>>);
 
 pub fn channel<T>() -> (Sender<T>, Receiver<T>) {
-    let arc_pool = std::sync::Arc::new(ArcPool::new());
+    let arc_pool = StdArc::new(ArcPool::new());
     let (sender, receiver) = crate::channel_with_consumer(arc_pool);
     (Sender(sender), Receiver(receiver))
 }
@@ -35,7 +37,7 @@ impl<T> Sender<T> {
         self.0.closed().await
     }
 
-    pub fn pool(&self) -> &std::sync::Arc<ArcPool<T>> {
+    pub fn pool(&self) -> &StdArc<ArcPool<T>> {
         self.0.consumer()
     }
 }
@@ -51,7 +53,7 @@ impl<T> Receiver<T> {
         Ok(unsafe { Arc::from_index(self.pool(), arc_index) })
     }
 
-    pub fn pool(&self) -> &std::sync::Arc<ArcPool<T>> {
+    pub fn pool(&self) -> &StdArc<ArcPool<T>> {
         self.0.consumer()
     }
 }
