@@ -67,6 +67,10 @@ impl<T> ArcPool<T> {
 pub struct Arc<T>(ConsumeOnDrop<ArcInner<T>>);
 
 impl<T> Arc<T> {
+    pub fn get_mut(this: &mut Self) -> Option<&mut T> {
+        this.0.get_mut()
+    }
+
     pub fn into_inner(Self(inner): Self) -> Option<T> {
         ConsumeOnDrop::into_inner(inner).into_inner()
     }

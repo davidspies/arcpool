@@ -119,6 +119,16 @@ impl<T> Consume for ArcInner<T> {
 }
 
 impl<T> ArcInner<T> {
+    pub(super) fn get_mut(&mut self) -> Option<&mut T> {
+        let (ref_count, ptr) = &self.pool.mem[self.index];
+        if ref_count.load(atomic::Ordering::Relaxed) != 1 {
+            return None;
+        }
+        atomic::fence(atomic::Ordering::Acquire);
+        let ptr = ptr.get();
+        Some(unsafe { (*ptr).assume_init_mut() })
+    }
+
     pub(super) fn into_inner(self) -> Option<T> {
         let (ref_count, ptr) = &self.pool.mem[self.index];
         if ref_count.fetch_sub(1, atomic::Ordering::Release) > 1 {
