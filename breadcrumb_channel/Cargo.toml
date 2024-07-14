@@ -9,8 +9,8 @@ derive-where.workspace = true
 parking_lot.workspace = true
 tokio = { workspace = true, features = ["sync"] }
 
-arc_queue_pool = { path = "../arc_queue_pool" }
-arc_slice_pool = { path = "../arc_slice_pool" }
+arc_queue_pool.workspace = true
+arc_slice_pool.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt", "time"] }

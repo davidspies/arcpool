@@ -8,7 +8,7 @@ consume_on_drop.workspace = true
 derive-where.workspace = true
 parking_lot.workspace = true
 
-stable_queue = { path = "../stable_queue" }
+stable_queue.workspace = true
 
 [dev-dependencies]
 bitvec.workspace = true
