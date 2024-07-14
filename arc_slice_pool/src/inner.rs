@@ -12,6 +12,9 @@ use std::{
 use consume_on_drop::Consume;
 use parking_lot::Mutex;
 
+/// A smaller representation of a [crate::Arc] that does not know which
+/// [crate::ArcPool] it came from. Behaves similarly to the raw ptr used in
+/// [from_raw](StdArc::from_raw) and [into_raw](StdArc::into_raw).
 pub struct ArcIndex<T> {
     index: usize,
     phantom: PhantomData<*const T>,

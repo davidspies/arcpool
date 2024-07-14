@@ -16,7 +16,7 @@ pub use self::inner::ArcIndex;
 
 mod inner;
 
-/// Stores `Arc` backing data in contiguous memory.
+/// Stores all the allocations for the [Arc]s together in chunks of contiguous memory.
 pub struct ArcPool<T>(RwLock<StdArc<ArcPoolInner<T>>>);
 
 unsafe impl<T: Send + Sync> Send for ArcPool<T> {}
@@ -61,6 +61,8 @@ impl<T> ArcPool<T> {
     }
 }
 
+/// A reference-counted pointer to a value of type `T` stored in an [ArcPool].
+/// Does not support weak references.
 #[derive_where(Clone)]
 pub struct Arc<T>(ConsumeOnDrop<ArcInner<T>>);
 
