@@ -11,6 +11,8 @@ impl StableIndex {
     }
 }
 
+/// As long as the element is not popped, the index returned by [push_back](Self::push_back)
+/// will continue to point to the pushed element.
 pub struct StableQueue<T> {
     inner: VecDeque<T>,
     head: StableIndex,
@@ -26,6 +28,8 @@ impl<T> StableQueue<T> {
         }
     }
 
+    /// If initialized with a fixed capacity, the queue cannot grow beyond that capacity
+    /// and the address in memory of elements inserted into the queue will not change.
     pub fn with_fixed_capacity(cap: usize) -> Self {
         Self {
             inner: VecDeque::with_capacity(cap),
