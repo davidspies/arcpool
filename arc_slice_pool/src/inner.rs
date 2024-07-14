@@ -79,6 +79,10 @@ impl<T> ArcPoolInner<T> {
             .set(next)
             .unwrap_or_else(|_| panic!("next already set"))
     }
+
+    pub(super) fn is_empty(&self) -> bool {
+        self.free_list.lock().len() == self.mem.len() && self.prev.weak_count() == 0
+    }
 }
 
 pub(super) struct ArcInner<T> {

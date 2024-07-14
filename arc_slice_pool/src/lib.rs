@@ -33,6 +33,10 @@ impl<T> ArcPool<T> {
         Self::with_capacity(0)
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.0.read().is_empty()
+    }
+
     pub fn with_capacity(cap: usize) -> Self {
         Self(RwLock::new(StdArc::new(ArcPoolInner::with_capacity(
             cap,
