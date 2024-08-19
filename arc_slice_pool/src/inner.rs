@@ -145,6 +145,21 @@ impl<T> ArcInner<T> {
         Some(unsafe { result.assume_init() })
     }
 
+    pub(super) fn ref_count(&self) -> usize {
+        let (ref_count, _ptr) = &self.pool.mem[self.index];
+        ref_count.load(atomic::Ordering::Acquire)
+    }
+
+    pub(super) fn is_unique(&self) -> bool {
+        let (ref_count, _ptr) = &self.pool.mem[self.index];
+        let ref_count = ref_count.load(atomic::Ordering::Relaxed);
+        let is_unique = ref_count == 1;
+        if is_unique {
+            atomic::fence(atomic::Ordering::Acquire);
+        }
+        is_unique
+    }
+
     pub(super) fn try_unwrap(self) -> Result<T, Self> {
         let (ref_count, _ptr) = &self.pool.mem[self.index];
         match ref_count.compare_exchange_weak(

@@ -1,6 +1,6 @@
 [package]
 name = "arc_slice_pool"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "Arcs backed by chunks of contiguous memory"
 license = "MIT"

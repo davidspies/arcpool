@@ -10,7 +10,7 @@ members = [
 
 [workspace.dependencies]
 arc_queue_pool = { path = "arc_queue_pool", version = "0.1.0" }
-arc_slice_pool = { path = "arc_slice_pool", version = "0.1.0" }
+arc_slice_pool = { path = "arc_slice_pool", version = "0.1.1" }
 breadcrumb_channel = { path = "breadcrumb_channel", version = "0.1.0" }
 stable_queue = { path = "stable_queue", version = "0.1.0" }
 

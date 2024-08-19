@@ -111,6 +111,17 @@ impl<T> Arc<T> {
             index,
         )))
     }
+
+    pub fn ref_count(this: &Self) -> usize {
+        this.0.ref_count()
+    }
+
+    /// Returns `true` if there are no other `Arc`s pointing to the same value.
+    /// 
+    /// This is equivalent to `Arc::ref_count(this) == 1` but may be more performant.
+    pub fn is_unique(this: &Self) -> bool {
+        this.0.is_unique()
+    }
 }
 
 impl<T> Deref for Arc<T> {
