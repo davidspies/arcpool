@@ -54,7 +54,7 @@ fn arc_try_unwrap() {
 fn arc_into_index_and_from_index() {
     let pool = ArcPool::new();
     let arc = pool.alloc(42);
-    let index = arc.into_index();
+    let index = Arc::into_index(arc);
     let arc2 = unsafe { Arc::from_index(&pool, index) };
     assert_eq!(*arc2, 42);
 }
@@ -63,7 +63,7 @@ fn arc_into_index_and_from_index() {
 fn arc_clone_from_index() {
     let pool = ArcPool::new();
     let arc = pool.alloc(42);
-    let index = arc.into_index();
+    let index = Arc::into_index(arc);
     let arc2 = unsafe { Arc::clone_from_index(&pool, &index) };
     assert_eq!(*arc2, 42);
     unsafe { Arc::from_index(&pool, index) };
@@ -116,9 +116,9 @@ fn arc_from_index_after_growth() {
 
     // Create initial Arcs and save their indices
     let arc1 = pool.alloc(1);
-    let index1 = arc1.into_index();
+    let index1 = Arc::into_index(arc1);
     let arc2 = pool.alloc(2);
-    let index2 = arc2.into_index();
+    let index2 = Arc::into_index(arc2);
 
     // Force pool growth by allocating more Arcs than the initial capacity
     let _other_arcs = Vec::from_iter((3..10).map(|i| pool.alloc(i)));

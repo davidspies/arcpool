@@ -86,8 +86,8 @@ impl<T> Arc<T> {
         }
     }
 
-    pub fn into_index(self) -> ArcIndex<T> {
-        ArcInner::into_index(ConsumeOnDrop::into_inner(self.0))
+    pub fn into_index(this: Self) -> ArcIndex<T> {
+        ArcInner::into_index(ConsumeOnDrop::into_inner(this.0))
     }
 
     pub fn ptr_eq(this: &Self, other: &Self) -> bool {
